@@ -1,0 +1,40 @@
+name: Build macOS App
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build Release
+        run: |
+          xcodebuild \
+            -project PakExplorer.xcodeproj \
+            -scheme PakExplorer \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Package App
+        run: |
+          APP_PATH="build/Build/Products/Release/PakExplorer.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "App bundle not found at $APP_PATH"
+            exit 1
+          fi
+          ditto -c -k --keepParent "$APP_PATH" PakExplorer-macOS.zip
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PakExplorer-macOS
+          path: PakExplorer-macOS.zip
