@@ -67,14 +67,12 @@ struct ContentView: View {
                 // Root node itself
                 NavigationLink(value: root) {
                     Label("/", systemImage: "folder.fill")
-                        .foregroundStyle(.yellow)
                 }
                 
                 // Recursive children
                 OutlineGroup(root.folderChildren ?? [], children: \.folderChildren) { node in
                     NavigationLink(value: node) {
                         Label(node.name, systemImage: "folder.fill")
-                            .foregroundStyle(.yellow)
                     }
                 }
             } else {
@@ -296,7 +294,6 @@ struct ContentView: View {
             TableColumn("Name", value: \.name) { node in
                 HStack {
                     Image(systemName: node.isFolder ? "folder.fill" : "doc")
-                        .foregroundStyle(node.isFolder ? .yellow : .primary)
                     nameLabel(for: node)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -345,9 +342,8 @@ struct ContentView: View {
                 ForEach(children) { node in
                     let isSelected = selectedFileID == node.id
                     VStack(spacing: 6) {
-                        Image(systemName: node.isFolder ? "folder.fill" : "doc")
-                            .font(.system(size: 36))
-                            .foregroundStyle(node.isFolder ? .yellow : .primary)
+                    Image(systemName: node.isFolder ? "folder.fill" : "doc")
+                        .font(.system(size: 36))
                         nameLabel(for: node, font: .caption, alignment: .center)
                             .lineLimit(2)
                     }
