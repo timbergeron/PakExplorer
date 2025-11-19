@@ -119,7 +119,8 @@ struct PakIconView: NSViewRepresentable {
             let item = collectionView.makeItem(withIdentifier: PakIconItem.reuseIdentifier, for: indexPath)
             guard let iconItem = item as? PakIconItem else { return item }
             let node = parent.nodes[indexPath.item]
-            iconItem.configure(with: node, zoomLevel: parent.zoomLevel)
+            let preview = previewImage(for: node)
+            iconItem.configure(with: node, zoomLevel: parent.zoomLevel, previewImage: preview)
             return iconItem
         }
 
@@ -151,6 +152,17 @@ struct PakIconView: NSViewRepresentable {
                 }
             }
             parent.selection = ids
+        }
+
+        private func previewImage(for node: PakNode) -> NSImage? {
+            // Only attempt previews for common image types
+            let ext = (node.name as NSString).pathExtension.lowercased()
+            let supported = ["png", "jpg", "jpeg", "gif", "tif", "tiff", "bmp", "heic", "heif"]
+            guard supported.contains(ext),
+                  let data = parent.viewModel.extractData(for: node) else {
+                return nil
+            }
+            return NSImage(data: data)
         }
 
         @objc func handleDoubleClick(_ recognizer: NSClickGestureRecognizer) {
@@ -211,18 +223,22 @@ final class PakIconItem: NSCollectionViewItem {
         ])
     }
 
-    func configure(with node: PakNode, zoomLevel: Int) {
+    func configure(with node: PakNode, zoomLevel: Int, previewImage: NSImage?) {
         let level = IconZoomLevel(rawValue: zoomLevel) ?? .medium
 
         iconWidthConstraint.constant = level.iconDimension
         iconHeightConstraint.constant = level.iconDimension
 
-        let symbolName = node.isFolder ? "folder.fill" : "doc"
-        if let baseImage = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) {
-            let config = NSImage.SymbolConfiguration(pointSize: level.symbolPointSize, weight: .regular)
-            iconView.image = baseImage.withSymbolConfiguration(config)
+        if let previewImage {
+            iconView.image = previewImage
         } else {
-            iconView.image = nil
+            let symbolName = node.isFolder ? "folder.fill" : "doc"
+            if let baseImage = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil) {
+                let config = NSImage.SymbolConfiguration(pointSize: level.symbolPointSize, weight: .regular)
+                iconView.image = baseImage.withSymbolConfiguration(config)
+            } else {
+                iconView.image = nil
+            }
         }
         nameField.stringValue = node.name
         nameField.toolTip = node.name

@@ -150,7 +150,7 @@ struct PakListView: NSViewRepresentable {
 
             if identifier == "name" {
                 cell.textField?.stringValue = node.name
-                cell.imageView?.image = NSImage(systemSymbolName: node.isFolder ? "folder.fill" : "doc", accessibilityDescription: nil)
+                cell.imageView?.image = iconImage(for: node)
             } else if identifier == "size" {
                 cell.textField?.stringValue = node.formattedFileSize
             } else if identifier == "type" {
@@ -158,6 +158,22 @@ struct PakListView: NSViewRepresentable {
             }
 
             return cell
+        }
+
+        private func iconImage(for node: PakNode) -> NSImage? {
+            if node.isFolder {
+                return NSImage(systemSymbolName: "folder.fill", accessibilityDescription: nil)
+            }
+
+            let ext = (node.name as NSString).pathExtension.lowercased()
+            let supported = ["png", "jpg", "jpeg", "gif", "tif", "tiff", "bmp", "heic", "heif"]
+            if supported.contains(ext),
+               let data = parent.viewModel.extractData(for: node),
+               let image = NSImage(data: data) {
+                return image
+            }
+
+            return NSImage(systemSymbolName: "doc", accessibilityDescription: nil)
         }
 
         @objc private func nameFieldEdited(_ sender: NSTextField) {
