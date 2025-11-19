@@ -39,6 +39,12 @@ struct PakSaveCommands: Commands {
             }
             .keyboardShortcut("S", modifiers: [.command, .shift])
             .disabled(pakCommands == nil)
+
+            Button("Delete File", role: .destructive) {
+                pakCommands?.deleteFile()
+            }
+            .keyboardShortcut(.delete, modifiers: [.command])
+            .disabled(!(pakCommands?.canDeleteFile ?? false))
         }
     }
 }

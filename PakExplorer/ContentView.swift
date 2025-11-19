@@ -99,18 +99,11 @@ struct ContentView: View {
                         }
                         .pickerStyle(.segmented)
                         .labelsHidden()
-
-                        Button {
-                            model.exportPakAs()
-                        } label: {
-                            Image(systemName: "square.and.arrow.down")
-                        }
-                        .help("Export current PAK as…")
-
                         Spacer()
                     }
                     .padding(.horizontal)
                     .padding(.top)
+                    .padding(.bottom)
 
                     Divider()
 
@@ -366,7 +359,7 @@ struct ContentView: View {
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
-                            .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.2), lineWidth: isSelected ? 2 : 1)
+                            .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
                     )
                     .contentShape(Rectangle())
                     .onTapGesture {
@@ -404,6 +397,8 @@ struct PakCommands {
     let save: () -> Void
     let saveAs: () -> Void
     let canSave: Bool
+    let deleteFile: () -> Void
+    let canDeleteFile: Bool
 }
 
 struct PakCommandsKey: FocusedValueKey {
@@ -489,7 +484,11 @@ private extension ContentView {
             saveAs: {
                 model.exportPakAs()
             },
-            canSave: model.canSave
+            canSave: model.canSave,
+            deleteFile: {
+                model.deleteSelectedFile()
+            },
+            canDeleteFile: model.selectedFile != nil
         )
     }
 }
