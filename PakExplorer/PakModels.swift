@@ -201,6 +201,13 @@ struct PakLoader {
         node.children?.forEach { sortNodeRecursively($0) }
     }
 
+    static func loadDirectoryTree(at directory: URL) throws -> PakNode {
+        let root = PakNode(name: "/")
+        try buildTree(from: directory, into: root)
+        sortNodeRecursively(root)
+        return root
+    }
+
     static func loadZip(from url: URL, name: String) throws -> PakFile {
         let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
@@ -385,6 +392,39 @@ struct PakZipWriter {
                 try writeChildren(node.children ?? [], to: folderURL, originalData: originalData)
             } else {
                 let fileURL = directory.appendingPathComponent(node.name)
+                let payload = data(for: node, originalData: originalData)
+                try payload.write(to: fileURL)
+            }
+        }
+    }
+
+    private static func data(for node: PakNode, originalData: Data?) -> Data {
+        if let local = node.localData {
+            return local
+        }
+        guard let entry = node.entry, let original = originalData,
+              entry.offset + entry.length <= original.count else {
+            return Data()
+        }
+        return original.subdata(in: entry.offset ..< entry.offset + entry.length)
+    }
+}
+
+struct PakFilesystemExporter {
+    static func export(root: PakNode, originalData: Data?, to directory: URL) throws {
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        try writeChildren(root.children ?? [], to: directory, originalData: originalData)
+    }
+
+    private static func writeChildren(_ nodes: [PakNode], to directory: URL, originalData: Data?) throws {
+        for node in nodes {
+            if node.isFolder {
+                let folderURL = directory.appendingPathComponent(node.name, isDirectory: true)
+                try FileManager.default.createDirectory(at: folderURL, withIntermediateDirectories: true)
+                try writeChildren(node.children ?? [], to: folderURL, originalData: originalData)
+            } else {
+                let fileURL = directory.appendingPathComponent(node.name, isDirectory: false)
                 let payload = data(for: node, originalData: originalData)
                 try payload.write(to: fileURL)
             }

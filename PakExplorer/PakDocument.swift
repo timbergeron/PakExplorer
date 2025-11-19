@@ -1,18 +1,16 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+extension UTType {
+    static let pakArchive = UTType(importedAs: "com.timbergeron.pakexplorer.pak")
+    static let pk3Archive = UTType(importedAs: "com.timbergeron.pakexplorer.pk3")
+}
+
 struct PakDocument: FileDocument {
     var pakFile: PakFile
 
     static var readableContentTypes: [UTType] {
-        var types: [UTType] = []
-        if let pakType = UTType(filenameExtension: "pak") {
-            types.append(pakType)
-        }
-        if let pk3Type = UTType(filenameExtension: "pk3") {
-            types.append(pk3Type)
-        }
-        return types
+        [UTType.pakArchive, UTType.pk3Archive]
     }
 
     static var writableContentTypes: [UTType] {
