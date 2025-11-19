@@ -78,16 +78,49 @@ final class PakViewModel: ObservableObject {
             }
         }
         
-        // Sort again
+        sortFolder(folder)
+        markDirty()
+    }
+    func deleteSelectedFile() {
+        guard let folder = currentFolder, let selected = selectedFile else { return }
+        
+        if let index = folder.children?.firstIndex(where: { $0.id == selected.id }) {
+            folder.children?.remove(at: index)
+            selectedFile = nil
+            markDirty()
+        }
+    }
+    
+    func exportPakAs() {
+        guard let pakFile = pakFile else { return }
+        
+        let save = NSSavePanel()
+        save.allowedContentTypes = PakDocument.readableContentTypes
+        save.nameFieldStringValue = pakFile.name
+        
+        save.begin { response in
+            guard response == .OK, let url = save.url else { return }
+            let result = PakWriter.write(root: pakFile.root, originalData: pakFile.data)
+            do {
+                try result.data.write(to: url)
+            } catch {
+                let alert = NSAlert(error: error)
+                alert.runModal()
+            }
+        }
+    }
+    
+    func markDirty() {
+        pakFile?.version = UUID()
+        objectWillChange.send()
+    }
+    
+    private func sortFolder(_ folder: PakNode) {
         folder.children?.sort {
             if $0.isFolder != $1.isFolder {
                 return $0.isFolder && !$1.isFolder
             }
             return $0.name.lowercased() < $1.name.lowercased()
         }
-        
-        // Trigger UI update
-        objectWillChange.send()
     }
 }
-

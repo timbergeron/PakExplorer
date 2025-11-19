@@ -24,12 +24,15 @@ struct PakDocument: FileDocument {
     }
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        // Rebuild the PAK file from the current node tree
-        if let root = pakFile?.root {
-            let newData = PakWriter.write(root: root, originalData: pakFile?.data)
-            return FileWrapper(regularFileWithContents: newData)
-        } else {
+        guard let root = pakFile?.root else {
             throw CocoaError(.fileWriteUnknown)
         }
+
+        let result = PakWriter.write(root: root, originalData: pakFile?.data)
+        pakFile?.data = result.data
+        pakFile?.entries = result.entries
+        pakFile?.version = UUID()
+
+        return FileWrapper(regularFileWithContents: result.data)
     }
 }

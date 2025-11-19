@@ -31,6 +31,12 @@ struct ContentView: View {
         } detail: {
             detailView
         }
+        .onChange(of: model.pakFile?.version) { _ in
+            document = PakDocument(pakFile: model.pakFile)
+        }
+        .focusedValue(\.pakCommands, PakCommands(saveAs: {
+            model.exportPakAs()
+        }))
     }
 
     private var sidebar: some View {
@@ -71,6 +77,13 @@ struct ContentView: View {
                         }
                         .pickerStyle(.segmented)
                         .labelsHidden()
+
+                        Button {
+                            model.exportPakAs()
+                        } label: {
+                            Image(systemName: "square.and.arrow.down")
+                        }
+                        .help("Export current PAK as…")
 
                         Spacer()
                     }
@@ -113,7 +126,7 @@ struct ContentView: View {
                     }
                     return true
                 }
-                .onChange(of: selectedFileID) { newValue in
+                .onChange(of: selectedFileID) { _, newValue in
                     // Update model selection for export
                     if let id = newValue {
                         model.selectedFile = folder.children?.first(where: { $0.id == id })
@@ -129,15 +142,23 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .onChange(of: model.currentFolder) { _ in
+        .onChange(of: model.currentFolder) { _, _ in
             selectedFileID = nil
             model.selectedFile = nil
             cancelRenaming()
         }
-        .onChange(of: renamingFocus) { newValue in
+        .onChange(of: renamingFocus) { _, newValue in
             if let renameID = renamingNodeID, renameID != newValue {
                 commitRename()
             }
+        }
+        // Global shortcut for delete
+        .onKeyPress(keys: ["d"]) { press in
+            if press.modifiers.contains(.command) {
+                model.deleteSelectedFile()
+                return .handled
+            }
+            return .ignored
         }
     }
 
@@ -161,7 +182,7 @@ struct ContentView: View {
         }
 
         let trimmed = renamingText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmed.isEmpty {
+        if !trimmed.isEmpty && trimmed != node.name {
             node.name = trimmed
             if let entry = node.entry {
                 let updatedPath: String
@@ -173,6 +194,7 @@ struct ContentView: View {
                 }
                 node.entry = PakEntry(name: updatedPath, offset: entry.offset, length: entry.length)
             }
+            model.markDirty()
         }
         cancelRenaming()
     }
@@ -240,6 +262,18 @@ struct ContentView: View {
                 model.exportSelectedFile()
             }
         }
+        
+        Divider()
+        
+        Button("Delete", role: .destructive) {
+            // If we are right-clicking a node that isn't selected, select it first?
+            // Or just delete that specific node?
+            // The model.deleteSelectedFile() relies on selectedFile.
+            // Let's update selection first if needed, or pass node to delete.
+            // For consistency with other actions:
+            select(node)
+            model.deleteSelectedFile()
+        }
     }
     @ViewBuilder
     private func listView(_ children: [PakNode]) -> some View {
@@ -269,10 +303,11 @@ struct ContentView: View {
                 .onDrag {
                     guard let data = model.extractData(for: node) else { return NSItemProvider() }
                     let provider = NSItemProvider()
-                    provider.suggestedName = node.name
-                    let type = UTType(filenameExtension: (node.name as NSString).pathExtension) ?? .content
+                    let name = node.name // Capture on main actor
+                    provider.suggestedName = name
+                    let type = UTType(filenameExtension: (name as NSString).pathExtension) ?? .content
                     provider.registerFileRepresentation(for: type, visibility: .all) { completion in
-                        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(node.name)
+                        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(name)
                         do {
                             try data.write(to: tempURL)
                             completion(tempURL, true, nil)
@@ -337,10 +372,11 @@ struct ContentView: View {
                     .onDrag {
                         guard let data = model.extractData(for: node) else { return NSItemProvider() }
                         let provider = NSItemProvider()
-                        provider.suggestedName = node.name
-                        let type = UTType(filenameExtension: (node.name as NSString).pathExtension) ?? .content
+                        let name = node.name // Capture on main actor
+                        provider.suggestedName = name
+                        let type = UTType(filenameExtension: (name as NSString).pathExtension) ?? .content
                         provider.registerFileRepresentation(for: type, visibility: .all) { completion in
-                            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(node.name)
+                            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(name)
                             do {
                                 try data.write(to: tempURL)
                                 completion(tempURL, true, nil)
@@ -355,5 +391,20 @@ struct ContentView: View {
             }
             .padding()
         }
+    }
+}
+
+struct PakCommands {
+    let saveAs: () -> Void
+}
+
+struct PakCommandsKey: FocusedValueKey {
+    typealias Value = PakCommands
+}
+
+extension FocusedValues {
+    var pakCommands: PakCommands? {
+        get { self[PakCommandsKey.self] }
+        set { self[PakCommandsKey.self] = newValue }
     }
 }
