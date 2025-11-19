@@ -7,10 +7,21 @@ final class PakViewModel: ObservableObject {
     @Published var pakFile: PakFile?
     @Published var currentFolder: PakNode? // Directory shown in right pane
     @Published var selectedFile: PakNode?  // File selected in right pane
+    @Published private(set) var hasUnsavedChanges = false
+    var documentURL: URL?
 
-    init(pakFile: PakFile?) {
+    var canSave: Bool {
+        pakFile != nil && hasUnsavedChanges
+    }
+
+    init(pakFile: PakFile?, documentURL: URL? = nil) {
         self.pakFile = pakFile
         self.currentFolder = pakFile?.root
+        self.documentURL = documentURL
+    }
+
+    func updateDocumentURL(_ url: URL?) {
+        documentURL = url
     }
 
 
@@ -108,10 +119,51 @@ final class PakViewModel: ObservableObject {
             }
         }
     }
+
+    @discardableResult
+    func saveCurrentPak(promptForLocationIfNeeded: Bool = true) -> Bool {
+        guard let pakFile = pakFile else { return false }
+
+        if let url = documentURL {
+            return write(pakFile: pakFile, to: url)
+        }
+
+        guard promptForLocationIfNeeded else { return false }
+
+        let save = NSSavePanel()
+        save.allowedContentTypes = PakDocument.readableContentTypes
+        save.nameFieldStringValue = pakFile.name
+        let response = save.runModal()
+        if response == .OK, let url = save.url {
+            let success = write(pakFile: pakFile, to: url)
+            if success {
+                documentURL = url
+            }
+            return success
+        }
+        return false
+    }
+
+    private func write(pakFile: PakFile, to url: URL) -> Bool {
+        let result = PakWriter.write(root: pakFile.root, originalData: pakFile.data)
+        do {
+            try result.data.write(to: url)
+            pakFile.data = result.data
+            pakFile.entries = result.entries
+            pakFile.version = UUID()
+            hasUnsavedChanges = false
+            return true
+        } catch {
+            let alert = NSAlert(error: error)
+            alert.runModal()
+            return false
+        }
+    }
     
     func markDirty() {
         pakFile?.version = UUID()
         objectWillChange.send()
+        hasUnsavedChanges = true
     }
     
     private func sortFolder(_ folder: PakNode) {

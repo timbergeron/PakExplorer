@@ -11,7 +11,7 @@ struct PakExplorerApp: App {
     
     var body: some Scene {
         DocumentGroup(newDocument: PakDocument()) { file in
-            ContentView(document: file.$document)
+            ContentView(document: file.$document, fileURL: file.fileURL)
         }
         .commands {
             // No "New" document
@@ -26,6 +26,13 @@ struct PakSaveCommands: Commands {
     @FocusedValue(\.pakCommands) private var pakCommands
     
     var body: some Commands {
+        CommandGroup(replacing: .saveItem) {
+            Button("Save") {
+                pakCommands?.save()
+            }
+            .keyboardShortcut("S")
+            .disabled(!(pakCommands?.canSave ?? false))
+        }
         CommandGroup(after: .saveItem) {
             Button("Save As…") {
                 pakCommands?.saveAs()

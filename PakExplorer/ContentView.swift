@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import AppKit
 
 fileprivate enum DetailViewStyle: String, CaseIterable, Identifiable {
     case list = "List"
@@ -10,6 +11,7 @@ fileprivate enum DetailViewStyle: String, CaseIterable, Identifiable {
 
 struct ContentView: View {
     @Binding var document: PakDocument
+    let fileURL: URL?
     @StateObject private var model: PakViewModel
     @State private var selectedFileID: PakNode.ID? // Selection in the detail table
     @State private var detailViewStyle: DetailViewStyle = .list
@@ -17,10 +19,13 @@ struct ContentView: View {
     @State private var renamingText: String = ""
     @State private var renamingNode: PakNode?
     @FocusState private var renamingFocus: PakNode.ID?
+    @State private var window: NSWindow?
+    @State private var windowDelegate = PakWindowDelegate()
 
-    init(document: Binding<PakDocument>) {
+    init(document: Binding<PakDocument>, fileURL: URL?) {
         self._document = document
-        self._model = StateObject(wrappedValue: PakViewModel(pakFile: document.wrappedValue.pakFile))
+        self.fileURL = fileURL
+        self._model = StateObject(wrappedValue: PakViewModel(pakFile: document.wrappedValue.pakFile, documentURL: fileURL))
     }
 
     @State private var sortOrder = [KeyPathComparator(\PakNode.name)]
@@ -31,12 +36,37 @@ struct ContentView: View {
         } detail: {
             detailView
         }
-        .onChange(of: model.pakFile?.version) { _, _ in
-            document = PakDocument(pakFile: model.pakFile)
+        .focusedValue(\.pakCommands, PakCommands(
+            save: {
+                _ = model.saveCurrentPak(promptForLocationIfNeeded: true)
+            },
+            saveAs: {
+                model.exportPakAs()
+            },
+            canSave: model.canSave
+        ))
+        .onAppear {
+            model.updateDocumentURL(fileURL)
+            window?.isDocumentEdited = model.hasUnsavedChanges
         }
-        .focusedValue(\.pakCommands, PakCommands(saveAs: {
-            model.exportPakAs()
-        }))
+        .onChange(of: fileURL) { _, newValue in
+            model.updateDocumentURL(newValue)
+        }
+        .onChange(of: model.hasUnsavedChanges) { _, newValue in
+            window?.isDocumentEdited = newValue
+        }
+        .background(
+            WindowAccessor { newWindow in
+                guard let newWindow else { return }
+                windowDelegate.viewModel = model
+                if window !== newWindow {
+                    window = newWindow
+                    windowDelegate.forwardingDelegate = newWindow.delegate
+                    newWindow.delegate = windowDelegate
+                }
+                newWindow.isDocumentEdited = model.hasUnsavedChanges
+            }
+        )
     }
 
     private var sidebar: some View {
@@ -379,7 +409,9 @@ struct ContentView: View {
 }
 
 struct PakCommands {
+    let save: () -> Void
     let saveAs: () -> Void
+    let canSave: Bool
 }
 
 struct PakCommandsKey: FocusedValueKey {
@@ -390,5 +422,67 @@ extension FocusedValues {
     var pakCommands: PakCommands? {
         get { self[PakCommandsKey.self] }
         set { self[PakCommandsKey.self] = newValue }
+    }
+}
+
+private struct WindowAccessor: NSViewRepresentable {
+    let callback: (NSWindow?) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async {
+            callback(view.window)
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            callback(nsView.window)
+        }
+    }
+}
+
+private final class PakWindowDelegate: NSObject, NSWindowDelegate {
+    weak var viewModel: PakViewModel?
+    weak var forwardingDelegate: NSWindowDelegate?
+
+    override func responds(to selector: Selector!) -> Bool {
+        if super.responds(to: selector) { return true }
+        return forwardingDelegate?.responds(to: selector) ?? false
+    }
+
+    override func forwardingTarget(for selector: Selector!) -> Any? {
+        if let delegate = forwardingDelegate, delegate.responds(to: selector) {
+            return delegate
+        }
+        return super.forwardingTarget(for: selector)
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        guard let model = viewModel, model.hasUnsavedChanges else {
+            return forwardingDelegate?.windowShouldClose?(sender) ?? true
+        }
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Do you want to save changes to this PAK?"
+        alert.informativeText = "Your changes will be lost if you don’t save them."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Don't Save")
+
+        let response = alert.runModal()
+        switch response {
+        case .alertFirstButtonReturn:
+            if model.saveCurrentPak(promptForLocationIfNeeded: true) {
+                return forwardingDelegate?.windowShouldClose?(sender) ?? true
+            }
+            return false
+        case .alertSecondButtonReturn:
+            return false
+        default:
+            return forwardingDelegate?.windowShouldClose?(sender) ?? true
+        }
     }
 }
