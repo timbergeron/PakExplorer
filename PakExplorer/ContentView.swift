@@ -312,7 +312,7 @@ struct ContentView: View {
                 }
             }
             TableColumn("Size", value: \.fileSize) { node in
-                Text(node.isFolder ? "--" : "\(node.fileSize)")
+                Text(node.formattedFileSize)
                     .monospacedDigit()
             }
             TableColumn("Type", value: \.fileType) { node in

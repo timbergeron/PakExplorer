@@ -39,6 +39,18 @@ final class PakNode: Identifiable, Hashable {
         return entry?.length ?? 0
     }
 
+    var formattedFileSize: String {
+        guard !isFolder else { return "--" }
+        return PakNode.sizeFormatter.string(fromByteCount: Int64(fileSize))
+    }
+
+    private static let sizeFormatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        formatter.includesActualByteCount = false
+        return formatter
+    }()
+
     var fileType: String {
         if isFolder { return "Folder" }
         return (name as NSString).pathExtension.uppercased() + " File"
