@@ -155,14 +155,7 @@ struct PakIconView: NSViewRepresentable {
         }
 
         private func previewImage(for node: PakNode) -> NSImage? {
-            // Only attempt previews for common image types
-            let ext = (node.name as NSString).pathExtension.lowercased()
-            let supported = ["png", "jpg", "jpeg", "gif", "tif", "tiff", "bmp", "heic", "heif"]
-            guard supported.contains(ext),
-                  let data = parent.viewModel.extractData(for: node) else {
-                return nil
-            }
-            return NSImage(data: data)
+            parent.viewModel.previewImage(for: node)
         }
 
         @objc func handleDoubleClick(_ recognizer: NSClickGestureRecognizer) {

@@ -9,6 +9,7 @@ final class PakViewModel: ObservableObject {
     @Published var selectedFile: PakNode?  // File selected in right pane (first of selection for backward compatibility)
     @Published var selectedNodes: [PakNode] = [] // Multi-selection support
     @Published private(set) var hasUnsavedChanges = false
+    private static let previewableImageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "tif", "tiff", "bmp", "heic", "heif"]
     var documentURL: URL?
 
     var canSave: Bool {
@@ -125,6 +126,18 @@ final class PakViewModel: ObservableObject {
             return pakFile.data.subdata(in: range)
         }
         return nil
+    }
+
+    func previewImage(for node: PakNode) -> NSImage? {
+        guard !node.isFolder, let data = extractData(for: node) else { return nil }
+
+        let ext = (node.name as NSString).pathExtension.lowercased()
+        if ext == "lmp" {
+            return LmpPreviewRenderer.renderImage(fileName: node.name, data: data)
+        }
+
+        guard Self.previewableImageExtensions.contains(ext) else { return nil }
+        return NSImage(data: data)
     }
     
     func importFiles(urls: [URL], to folder: PakNode) {
@@ -308,4 +321,200 @@ final class PakViewModel: ObservableObject {
             return $0.name.lowercased() < $1.name.lowercased()
         }
     }
+}
+
+private enum LmpPreviewRenderer {
+    private enum HeaderType {
+        case none
+        case simple
+    }
+
+    private enum PixelType {
+        case palettized
+        case rgb
+
+        var bytesPerPixel: Int {
+            switch self {
+            case .palettized:
+                return 1
+            case .rgb:
+                return 3
+            }
+        }
+    }
+
+    private struct SpecialCase {
+        let width: Int
+        let height: Int
+        let header: HeaderType
+        let pixelType: PixelType
+        let transparentIndex: Int?
+    }
+
+    private static let specialCases: [String: SpecialCase] = [
+        "conchars": SpecialCase(width: 128, height: 128, header: .none, pixelType: .palettized, transparentIndex: 0),
+        "conchars.lmp": SpecialCase(width: 128, height: 128, header: .none, pixelType: .palettized, transparentIndex: 0),
+        "pop.lmp": SpecialCase(width: 16, height: 16, header: .none, pixelType: .palettized, transparentIndex: 255),
+        "colormap.lmp": SpecialCase(width: 256, height: 64, header: .none, pixelType: .palettized, transparentIndex: 255)
+    ]
+
+    static func renderImage(fileName: String, data: Data) -> NSImage? {
+        let normalizedName = fileName.lowercased()
+        let baseName = normalizedName.split(separator: "/").last.map(String.init) ?? normalizedName
+        let rootName = baseName.split(separator: ".").first.map(String.init) ?? baseName
+        let matchedSpecial = specialCases[baseName] ?? specialCases[rootName]
+
+        var header: HeaderType = matchedSpecial?.header ?? .simple
+        var pixelType: PixelType = matchedSpecial?.pixelType ?? .palettized
+        var width = matchedSpecial?.width ?? 0
+        var height = matchedSpecial?.height ?? 0
+        var offset = header == .simple ? 8 : 0
+
+        let transparencyIndex: Int?
+        if pixelType == .palettized {
+            transparencyIndex = matchedSpecial?.transparentIndex ?? 255
+        } else {
+            transparencyIndex = nil
+        }
+
+        if matchedSpecial == nil && data.count == 768 {
+            // Palette files do not carry a header; treat as a 16x16 RGB swatch.
+            header = .none
+            pixelType = .rgb
+            width = 16
+            height = 16
+            offset = 0
+        }
+
+        if header == .simple {
+            guard let parsedWidth = readInt32LE(data, offset: 0),
+                  let parsedHeight = readInt32LE(data, offset: 4) else {
+                return nil
+            }
+            width = parsedWidth
+            height = parsedHeight
+        }
+
+        guard width > 0, height > 0 else { return nil }
+        let pixelCountResult = width.multipliedReportingOverflow(by: height)
+        guard !pixelCountResult.overflow else { return nil }
+        let pixelCount = pixelCountResult.partialValue
+
+        let bytesPerPixel = pixelType.bytesPerPixel
+        let expectedBytesResult = pixelCount.multipliedReportingOverflow(by: bytesPerPixel)
+        guard !expectedBytesResult.overflow else { return nil }
+        let expectedBytes = expectedBytesResult.partialValue
+
+        guard data.count >= offset + expectedBytes else { return nil }
+        let pixelData = data.subdata(in: offset ..< offset + expectedBytes)
+
+        let rgbaBytesResult = pixelCount.multipliedReportingOverflow(by: 4)
+        guard !rgbaBytesResult.overflow else { return nil }
+        var rgba = Data(count: rgbaBytesResult.partialValue)
+
+        var conversionSucceeded = true
+        rgba.withUnsafeMutableBytes { destBuffer in
+            guard let dest = destBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                conversionSucceeded = false
+                return
+            }
+
+            switch pixelType {
+            case .rgb:
+                pixelData.withUnsafeBytes { srcBuffer in
+                    guard let src = srcBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                        conversionSucceeded = false
+                        return
+                    }
+                    for i in 0..<pixelCount {
+                        let srcIndex = i * 3
+                        let destIndex = i * 4
+                        dest[destIndex] = src[srcIndex]
+                        dest[destIndex + 1] = src[srcIndex + 1]
+                        dest[destIndex + 2] = src[srcIndex + 2]
+                        dest[destIndex + 3] = 255
+                    }
+                }
+            case .palettized:
+                let palette = QuakePalette.bytes
+                guard palette.count >= 768 else {
+                    conversionSucceeded = false
+                    return
+                }
+
+                pixelData.withUnsafeBytes { srcBuffer in
+                    guard let src = srcBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                        conversionSucceeded = false
+                        return
+                    }
+
+                    for i in 0..<pixelCount {
+                        let paletteIndex = Int(src[i])
+                        let destIndex = i * 4
+
+                        if let transparencyIndex, paletteIndex == transparencyIndex {
+                            dest[destIndex] = 0
+                            dest[destIndex + 1] = 0
+                            dest[destIndex + 2] = 0
+                            dest[destIndex + 3] = 0
+                            continue
+                        }
+
+                        let paletteOffset = paletteIndex * 3
+                        guard paletteOffset + 2 < palette.count else {
+                            conversionSucceeded = false
+                            return
+                        }
+
+                        dest[destIndex] = palette[paletteOffset]
+                        dest[destIndex + 1] = palette[paletteOffset + 1]
+                        dest[destIndex + 2] = palette[paletteOffset + 2]
+                        dest[destIndex + 3] = 255
+                    }
+                }
+            }
+        }
+
+        guard conversionSucceeded else { return nil }
+
+        guard let provider = CGDataProvider(data: rgba as CFData) else { return nil }
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        guard let cgImage = CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: true,
+            intent: .defaultIntent
+        ) else {
+            return nil
+        }
+
+        return NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
+    }
+
+    private static func readInt32LE(_ data: Data, offset: Int) -> Int? {
+        guard offset + 4 <= data.count else { return nil }
+        return data.withUnsafeBytes { rawBuffer in
+            let value = rawBuffer.load(fromByteOffset: offset, as: Int32.self)
+            return Int(Int32(littleEndian: value))
+        }
+    }
+}
+
+private enum QuakePalette {
+    static let bytes: [UInt8] = {
+        guard let data = Data(base64Encoded: """
+AAAADw8PHx8fLy8vPz8/S0tLW1tba2tre3t7i4uLm5ubq6uru7u7y8vL29vb6+vrDwsHFw8LHxcLJxsPLyMTNysXPy8XSzcbUzsbW0MfY0sfa1Mfc1cfe18jg2cjj28jCwsPExMbGxsnJyczLy8/NzdLPz9XR0dnT09zW1t/Y2OLa2uXc3Oje3uvg4O7i4vLAAAABwcACwsAExMAGxsAIyMAKysHLy8HNzcHPz8HR0cHS0sLU1MLW1sLY2MLa2sPBwAADwAAFwAAHwAAJwAALwAANwAAPwAARwAATwAAVwAAXwAAZwAAbwAAdwAAfwAAExMAGxsAIyMALysANy8AQzcASzsHV0MHX0cHa0sLd1MPg1cTi1sTl18bo2Mfr2cjIxMHLxcLOx8PSyMTVysXYy8fczcjfzsrj0Mzn08zr2Mvv3cvz48r36sn78sf//MbCwcAGxMAKyMPNysTRzMbUzcjYz8rb0czf1M/i19Hm2tTp3tft4drw5N706OL47OXq4ujn3+Xk3OHi2d7f1tvd1Nja0tXXz9LVzdDSy83QycvNx8jKxcbIxMTFwsLDwcHu3Ofr2uPo1+Dl1d3i09rf0tfc0NTaztLXzM/Uys3RyMrOx8jLxcbIxMTFwsLDwcH28O7y7Onv6Obr5eLo4d7l3tvh29fe2NTa1dHX0s7Uz8zQzMnNysfJx8XGxMPDwsHb4N7Z3tvX3NnV2tfT2NXR1tPP1NHN0s/L0M3KzsvIzMnHysfFyMXDxsTCxMLBwsH//Mb798X28sTy7cPu6cPq5cLm4MHi3MHe2MHa1MAW0cASzcAOysAKx8AGw8ACwcAAAD/CwvvExPfGxvPIyO/KyuvLy+fLy+PLy9/Ly9vLy9fKytPIyM/GxsvExMfCwsPKwAAOwAASwcAXwcAbw8AfxcHkx8HoycLtzMPw0sbz2Mr238745dP56tf779399OLp3s7t5s3x8M35+NXf7//q+f/1///ZwAAiwAAswAA1wAA/wAA//OT//fH////n1tT
+""") else {
+            return []
+        }
+        return Array(data)
+    }()
 }

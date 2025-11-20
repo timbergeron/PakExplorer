@@ -164,15 +164,9 @@ struct PakListView: NSViewRepresentable {
             if node.isFolder {
                 return NSImage(systemSymbolName: "folder.fill", accessibilityDescription: nil)
             }
-
-            let ext = (node.name as NSString).pathExtension.lowercased()
-            let supported = ["png", "jpg", "jpeg", "gif", "tif", "tiff", "bmp", "heic", "heif"]
-            if supported.contains(ext),
-               let data = parent.viewModel.extractData(for: node),
-               let image = NSImage(data: data) {
-                return image
+            if let preview = parent.viewModel.previewImage(for: node) {
+                return preview
             }
-
             return NSImage(systemSymbolName: "doc", accessibilityDescription: nil)
         }
 
