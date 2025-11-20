@@ -2,6 +2,20 @@ import SwiftUI
 import AppKit
 import Foundation
 
+// Custom table view so we can intercept key events and implement our own
+// Finder-style type-to-select behavior without triggering system beeps.
+private final class PakListTableView: NSTableView {
+    var onHandledKeyDown: ((NSEvent) -> Bool)?
+
+    override func keyDown(with event: NSEvent) {
+        if let handler = onHandledKeyDown, handler(event) {
+            // Event was handled (or intentionally consumed) by our coordinator.
+            return
+        }
+        super.keyDown(with: event)
+    }
+}
+
 struct PakListView: NSViewRepresentable {
     var nodes: [PakNode]
     @Binding var selection: Set<PakNode.ID>
@@ -14,7 +28,7 @@ struct PakListView: NSViewRepresentable {
     }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let tableView = NSTableView()
+        let tableView = PakListTableView()
         tableView.usesAlternatingRowBackgroundColors = true
         tableView.allowsMultipleSelection = true
         tableView.rowSizeStyle = .medium
@@ -51,6 +65,9 @@ struct PakListView: NSViewRepresentable {
         tableView.addTableColumn(sizeColumn)
         tableView.addTableColumn(typeColumn)
         tableView.headerView = NSTableHeaderView()
+        tableView.onHandledKeyDown = { [weak coordinator = context.coordinator] event in
+            coordinator?.handleKeyDown(event) ?? false
+        }
 
         let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
@@ -85,6 +102,9 @@ struct PakListView: NSViewRepresentable {
         private var renameWorkItem: DispatchWorkItem?
         var lastSelectionChange = Date.distantPast
         private let nameColumnIdentifier = NSUserInterfaceItemIdentifier("name")
+        private let typeSelectionResetInterval: TimeInterval = 1.0
+        private var typeSelectionBuffer = ""
+        private var lastTypeSelectionDate = Date.distantPast
 
         init(parent: PakListView) {
             self.parent = parent
@@ -222,6 +242,80 @@ struct PakListView: NSViewRepresentable {
             default:
                 break
             }
+        }
+        // MARK: - Type-to-select handling
+
+        func handleKeyDown(_ event: NSEvent) -> Bool {
+            guard let tableView = tableView else { return false }
+
+            // Ignore Command/Option/Control-modified keys so shortcuts keep working.
+            let modifiers = event.modifierFlags.intersection([.command, .option, .control])
+            guard modifiers.isEmpty else { return false }
+
+            guard let characters = event.charactersIgnoringModifiers, !characters.isEmpty else {
+                return false
+            }
+
+            // Filter to printable ASCII characters; ignore control keys like arrows, etc.
+            let scalars = characters.unicodeScalars.filter { scalar in
+                guard scalar.isASCII else { return false }
+                if CharacterSet.controlCharacters.contains(scalar) { return false }
+                return scalar.value >= 0x20
+            }
+            guard !scalars.isEmpty else { return false }
+
+            cancelPendingRename()
+
+            let input = String(String.UnicodeScalarView(scalars)).lowercased()
+            updateTypeSelectionBuffer(with: input)
+
+            guard let match = findMatch(for: typeSelectionBuffer, in: tableView) else {
+                // No match – consume the event so we don't get the system beep.
+                return true
+            }
+
+            tableView.selectRowIndexes(IndexSet(integer: match), byExtendingSelection: false)
+            tableView.scrollRowToVisible(match)
+            return true
+        }
+
+        private func updateTypeSelectionBuffer(with input: String) {
+            let now = Date()
+            if now.timeIntervalSince(lastTypeSelectionDate) > typeSelectionResetInterval {
+                // Too much time has passed – start a new sequence.
+                typeSelectionBuffer = ""
+            } else if typeSelectionBuffer.count == 1, typeSelectionBuffer == input {
+                // Repeatedly pressing the same key within the interval should
+                // cycle through items starting with that letter, not build a
+                // longer prefix like "aa".
+                typeSelectionBuffer = ""
+            }
+
+            typeSelectionBuffer += input
+            lastTypeSelectionDate = now
+        }
+
+        private func findMatch(for prefix: String, in tableView: NSTableView) -> Int? {
+            guard !prefix.isEmpty, !parent.nodes.isEmpty else { return nil }
+            let lowerPrefix = prefix.lowercased()
+
+            let start = max(tableView.selectedRow + 1, 0)
+            if let result = search(prefix: lowerPrefix, range: start ..< parent.nodes.count) {
+                return result
+            }
+            if start > 0, let wrapResult = search(prefix: lowerPrefix, range: 0 ..< start) {
+                return wrapResult
+            }
+            return nil
+        }
+
+        private func search(prefix: String, range: Range<Int>) -> Int? {
+            for index in range {
+                if parent.nodes[index].name.lowercased().hasPrefix(prefix) {
+                    return index
+                }
+            }
+            return nil
         }
 
         @objc func tableViewSingleClicked(_ sender: NSTableView) {

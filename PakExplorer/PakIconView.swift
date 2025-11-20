@@ -1,6 +1,17 @@
 import SwiftUI
 import AppKit
 
+private final class PakIconCollectionView: NSCollectionView {
+    var onHandledKeyDown: ((NSEvent) -> Bool)?
+
+    override func keyDown(with event: NSEvent) {
+        if let onHandledKeyDown, onHandledKeyDown(event) {
+            return
+        }
+        super.keyDown(with: event)
+    }
+}
+
 fileprivate enum IconZoomLevel: Int {
     case small = 0
     case medium = 1
@@ -59,7 +70,7 @@ struct PakIconView: NSViewRepresentable {
         layout.minimumInteritemSpacing = 8
         layout.minimumLineSpacing = 12
 
-        let collectionView = NSCollectionView()
+        let collectionView = PakIconCollectionView()
         collectionView.collectionViewLayout = layout
         collectionView.isSelectable = true
         collectionView.allowsMultipleSelection = true
@@ -67,6 +78,9 @@ struct PakIconView: NSViewRepresentable {
         collectionView.dataSource = context.coordinator
         collectionView.register(PakIconItem.self, forItemWithIdentifier: PakIconItem.reuseIdentifier)
         collectionView.setDraggingSourceOperationMask(.copy, forLocal: false)
+        collectionView.onHandledKeyDown = { [weak coordinator = context.coordinator] event in
+            coordinator?.handleKeyDown(event) ?? false
+        }
 
         let doubleClickRecognizer = NSClickGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleDoubleClick(_:)))
         doubleClickRecognizer.numberOfClicksRequired = 2
@@ -102,6 +116,9 @@ struct PakIconView: NSViewRepresentable {
     final class Coordinator: NSObject, NSCollectionViewDataSource, NSCollectionViewDelegate {
         var parent: PakIconView
         weak var collectionView: NSCollectionView?
+        private let typeSelectionResetInterval: TimeInterval = 1.0
+        private var typeSelectionBuffer = ""
+        private var lastTypeSelectionDate = Date.distantPast
 
         init(parent: PakIconView) {
             self.parent = parent
@@ -156,6 +173,74 @@ struct PakIconView: NSViewRepresentable {
 
         private func previewImage(for node: PakNode) -> NSImage? {
             parent.viewModel.previewImage(for: node)
+        }
+
+        func handleKeyDown(_ event: NSEvent) -> Bool {
+            guard let collectionView = collectionView else { return false }
+            let modifiers = event.modifierFlags.intersection([.command, .option, .control])
+            guard modifiers.isEmpty else { return false }
+            guard let characters = event.charactersIgnoringModifiers, !characters.isEmpty else { return false }
+
+            let scalars = characters.unicodeScalars.filter { scalar in
+                // Ignore control characters and space (space is reserved for Quick Look-like actions).
+                guard scalar.isASCII, scalar.value >= 0x21 else { return false }
+                return !CharacterSet.controlCharacters.contains(scalar)
+            }
+
+            guard !scalars.isEmpty else { return false }
+
+            let input = String(String.UnicodeScalarView(scalars))
+            updateTypeSelectionBuffer(with: input)
+
+            guard let match = findMatch(for: typeSelectionBuffer, in: collectionView) else {
+                // No match, just ignore without beeping.
+                return true
+            }
+
+            let indexPath = IndexPath(item: match, section: 0)
+            let set = Set([indexPath])
+            collectionView.selectItems(at: set, scrollPosition: .centeredVertically)
+            collectionView.scrollToItems(at: set, scrollPosition: .centeredVertically)
+            updateSelection(from: collectionView)
+            return true
+        }
+
+        private func updateTypeSelectionBuffer(with input: String) {
+            let now = Date()
+            if now.timeIntervalSince(lastTypeSelectionDate) > typeSelectionResetInterval {
+                typeSelectionBuffer = ""
+            } else if typeSelectionBuffer.count == 1, typeSelectionBuffer == input.lowercased() {
+                // Repeatedly pressing the same key cycles through matches like Finder.
+                typeSelectionBuffer = ""
+            }
+
+            typeSelectionBuffer += input.lowercased()
+            lastTypeSelectionDate = now
+        }
+
+        private func findMatch(for prefix: String, in collectionView: NSCollectionView) -> Int? {
+            guard !prefix.isEmpty, !parent.nodes.isEmpty else { return nil }
+            let lowerPrefix = prefix.lowercased()
+
+            let currentSelection = collectionView.selectionIndexPaths.sorted { $0.item < $1.item }.first?.item ?? -1
+            let start = currentSelection + 1
+
+            if let result = search(prefix: lowerPrefix, range: start ..< parent.nodes.count) {
+                return result
+            }
+            if start > 0, let wrapResult = search(prefix: lowerPrefix, range: 0 ..< start) {
+                return wrapResult
+            }
+            return nil
+        }
+
+        private func search(prefix: String, range: Range<Int>) -> Int? {
+            for index in range {
+                if parent.nodes[index].name.lowercased().contains(prefix) {
+                    return index
+                }
+            }
+            return nil
         }
 
         @objc func handleDoubleClick(_ recognizer: NSClickGestureRecognizer) {
