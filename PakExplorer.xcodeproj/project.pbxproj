@@ -8,6 +8,7 @@
 
 /* Begin PBXFileReference section */
 		85121D9F2ECD6CE600FCB4CC /* PakExplorer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PakExplorer.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		85121DAF2ECD6CE600FCB4DD /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -32,6 +33,7 @@
 		85121D962ECD6CE600FCB4CC = {
 			isa = PBXGroup;
 			children = (
+				85121DAF2ECD6CE600FCB4DD /* Info.plist */,
 				85121DA12ECD6CE600FCB4CC /* PakExplorer */,
 				85121DA02ECD6CE600FCB4CC /* Products */,
 			);
@@ -255,7 +257,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = PakExplorer/Info.plist;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -286,7 +288,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = PakExplorer/Info.plist;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
