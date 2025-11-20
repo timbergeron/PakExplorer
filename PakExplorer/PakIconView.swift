@@ -119,28 +119,35 @@ struct PakIconView: NSViewRepresentable {
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let collectionView = context.coordinator.collectionView else { return }
+
         if let layout = collectionView.collectionViewLayout as? NSCollectionViewFlowLayout {
             let zoom = IconZoomLevel(rawValue: zoomLevel) ?? .medium
             layout.itemSize = zoom.itemSize
         }
-        collectionView.reloadData()
 
-        // Apply selection from SwiftUI to NSCollectionView
-        let ids = selection
-        let indexPaths: Set<IndexPath> = Set(
-            nodes.enumerated().compactMap { index, node in
-                ids.contains(node.id) ? IndexPath(item: index, section: 0) : nil
-            }
-        )
-        collectionView.selectItems(at: indexPaths, scrollPosition: [])
+        let firstResponder = collectionView.window?.firstResponder
+        let isEditing = (firstResponder is NSTextView) || (firstResponder is NSTextField)
+        if !isEditing {
+            collectionView.reloadData()
+
+            // Apply selection from SwiftUI to NSCollectionView when not editing.
+            let ids = selection
+            let indexPaths: Set<IndexPath> = Set(
+                nodes.enumerated().compactMap { index, node in
+                    ids.contains(node.id) ? IndexPath(item: index, section: 0) : nil
+                }
+            )
+            collectionView.selectItems(at: indexPaths, scrollPosition: [])
+        }
     }
 
-    final class Coordinator: NSObject, NSCollectionViewDataSource, NSCollectionViewDelegate {
+    final class Coordinator: NSObject, NSCollectionViewDataSource, NSCollectionViewDelegate, NSTextFieldDelegate {
         var parent: PakIconView
         weak var collectionView: NSCollectionView?
         private let typeSelectionResetInterval: TimeInterval = 1.0
         private var typeSelectionBuffer = ""
         private var lastTypeSelectionDate = Date.distantPast
+        private var renameWorkItem: DispatchWorkItem?
 
         init(parent: PakIconView) {
             self.parent = parent
@@ -160,6 +167,7 @@ struct PakIconView: NSViewRepresentable {
             let node = parent.nodes[indexPath.item]
             let preview = previewImage(for: node)
             iconItem.configure(with: node, zoomLevel: parent.zoomLevel, previewImage: preview)
+            iconItem.nameField.tag = indexPath.item
             return iconItem
         }
 
@@ -175,10 +183,46 @@ struct PakIconView: NSViewRepresentable {
         }
 
         func collectionView(_ collectionView: NSCollectionView, didSelectItemsAt indexPaths: Set<IndexPath>) {
+            cancelPendingRename()
             updateSelection(from: collectionView)
+
+            guard indexPaths.count == 1,
+                  let indexPath = indexPaths.first else { return }
+
+            let event = NSApp.currentEvent
+            let modifiers = event?.modifierFlags ?? []
+            if modifiers.contains(.command) ||
+                modifiers.contains(.shift) ||
+                modifiers.contains(.option) ||
+                modifiers.contains(.control) {
+                return
+            }
+            if let type = event?.type,
+               type != .leftMouseUp && type != .leftMouseDown {
+                return
+            }
+
+            let selection = collectionView.selectionIndexPaths
+            guard selection.contains(indexPath), selection.count == 1 else { return }
+
+            let workItem = DispatchWorkItem { [weak self] in
+                guard let self = self,
+                      let collectionView = self.collectionView else { return }
+
+                let currentSelection = collectionView.selectionIndexPaths
+                guard currentSelection.contains(indexPath), currentSelection.count == 1 else { return }
+
+                if let item = collectionView.item(at: indexPath) as? PakIconItem {
+                    item.beginRenaming(delegate: self)
+                }
+            }
+
+            renameWorkItem = workItem
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)
         }
 
         func collectionView(_ collectionView: NSCollectionView, didDeselectItemsAt indexPaths: Set<IndexPath>) {
+            cancelPendingRename()
             updateSelection(from: collectionView)
         }
 
@@ -266,6 +310,7 @@ struct PakIconView: NSViewRepresentable {
         }
 
         @objc func handleDoubleClick(_ recognizer: NSClickGestureRecognizer) {
+            cancelPendingRename()
             guard recognizer.state == .ended,
                   let collectionView = collectionView else { return }
 
@@ -276,6 +321,11 @@ struct PakIconView: NSViewRepresentable {
 
             let node = parent.nodes[indexPath.item]
             open(node: node)
+        }
+
+        private func cancelPendingRename() {
+            renameWorkItem?.cancel()
+            renameWorkItem = nil
         }
 
         func contextMenu(for indexPath: IndexPath) -> NSMenu? {
@@ -319,6 +369,11 @@ struct PakIconView: NSViewRepresentable {
 
             menu.addItem(.separator())
 
+            let renameItem = NSMenuItem(title: "Rename", action: #selector(renameItem(_:)), keyEquivalent: "")
+            renameItem.target = self
+            renameItem.representedObject = indexPath
+            menu.addItem(renameItem)
+
             let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteSelection(_:)), keyEquivalent: "")
             deleteItem.target = self
             deleteItem.isEnabled = parent.viewModel.canDeleteFile
@@ -355,6 +410,15 @@ struct PakIconView: NSViewRepresentable {
             parent.onNewFolder()
         }
 
+        @objc private func renameItem(_ sender: NSMenuItem) {
+            guard let indexPath = sender.representedObject as? IndexPath,
+                  let collectionView = collectionView,
+                  let item = collectionView.item(at: indexPath) as? PakIconItem else { return }
+
+            collectionView.selectItems(at: [indexPath], scrollPosition: [])
+            item.beginRenaming(delegate: self)
+        }
+
         @objc private func deleteSelection(_ sender: NSMenuItem) {
             parent.viewModel.deleteSelectedFile()
         }
@@ -366,6 +430,36 @@ struct PakIconView: NSViewRepresentable {
                 parent.viewModel.openInDefaultApp(node: node)
             }
         }
+
+        func controlTextDidEndEditing(_ obj: Notification) {
+            guard let collectionView = collectionView else { return }
+
+            let textField: NSTextField
+            if let tf = obj.object as? NSTextField {
+                textField = tf
+            } else if let tv = obj.object as? NSTextView,
+                      let tf = tv.delegate as? NSTextField {
+                textField = tf
+            } else {
+                return
+            }
+
+            let newName = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !newName.isEmpty else { return }
+
+            let index = textField.tag
+            guard index >= 0, index < parent.nodes.count else { return }
+
+            let node = parent.nodes[index]
+            guard newName != node.name else { return }
+
+            parent.viewModel.rename(node: node, to: newName)
+
+            let indexPath = IndexPath(item: index, section: 0)
+            if let item = collectionView.item(at: indexPath) as? PakIconItem {
+                item.endRenaming()
+            }
+        }
     }
 }
 
@@ -374,7 +468,7 @@ final class PakIconItem: NSCollectionViewItem {
 
     private let iconContainerView = NSView()
     private let iconView = NSImageView()
-    private let nameField = NSTextField(labelWithString: "")
+    let nameField = NSTextField(string: "")
     private var iconWidthConstraint: NSLayoutConstraint!
     private var iconHeightConstraint: NSLayoutConstraint!
 
@@ -390,6 +484,11 @@ final class PakIconItem: NSCollectionViewItem {
         iconView.wantsLayer = true
         
         nameField.translatesAutoresizingMaskIntoConstraints = false
+        nameField.isBordered = false
+        nameField.isBezeled = false
+        nameField.drawsBackground = false
+        nameField.isEditable = false
+        nameField.isSelectable = false
         nameField.alignment = .center
         nameField.lineBreakMode = .byCharWrapping
         nameField.maximumNumberOfLines = 2
@@ -445,6 +544,20 @@ final class PakIconItem: NSCollectionViewItem {
         nameField.toolTip = node.name
         
         updateSelectionState()
+    }
+
+    func beginRenaming(delegate: NSTextFieldDelegate) {
+        nameField.isEditable = true
+        nameField.isSelectable = true
+        nameField.delegate = delegate
+        view.window?.makeFirstResponder(nameField)
+        nameField.selectText(nil)
+    }
+
+    func endRenaming() {
+        nameField.isEditable = false
+        nameField.isSelectable = false
+        nameField.delegate = nil
     }
 
     override var isSelected: Bool {

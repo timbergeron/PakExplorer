@@ -36,7 +36,7 @@ private final class PakListTableView: NSTableView {
 }
 
 struct PakListView: NSViewRepresentable {
-    var nodes: [PakNode]
+    @Binding var nodes: [PakNode]
     @Binding var selection: Set<PakNode.ID>
     @Binding var sortOrder: [KeyPathComparator<PakNode>]
     var viewModel: PakViewModel
@@ -107,9 +107,14 @@ struct PakListView: NSViewRepresentable {
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let tableView = context.coordinator.tableView else { return }
+        let isEditing = tableView.currentEditor() != nil || (tableView.window?.firstResponder is NSTextView)
+        if isEditing {
+            return
+        }
+
         tableView.reloadData()
 
-        // Apply selection from SwiftUI to NSTableView
+        // Apply selection from SwiftUI to NSTableView when not editing to avoid dropping focus.
         let ids = selection
         let indexes = IndexSet(nodes.enumerated().compactMap { index, node in
             ids.contains(node.id) ? index : nil
@@ -123,7 +128,7 @@ struct PakListView: NSViewRepresentable {
         }
     }
 
-    final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate {
+    final class Coordinator: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate {
         var parent: PakListView
         weak var tableView: NSTableView?
         private var renameWorkItem: DispatchWorkItem?
@@ -162,8 +167,7 @@ struct PakListView: NSViewRepresentable {
                     textField.isEditable = true
                     textField.isSelectable = true
                     textField.lineBreakMode = .byTruncatingMiddle
-                    textField.target = self
-                    textField.action = #selector(nameFieldEdited(_:))
+                    textField.delegate = self
                 } else {
                     textField = NSTextField(labelWithString: "")
                 }
@@ -198,6 +202,7 @@ struct PakListView: NSViewRepresentable {
             if identifier == "name" {
                 cell.textField?.stringValue = node.name
                 cell.imageView?.image = iconImage(for: node)
+                cell.objectValue = node.id
             } else if identifier == "size" {
                 cell.textField?.stringValue = node.formattedFileSize
             } else if identifier == "type" {
@@ -217,18 +222,37 @@ struct PakListView: NSViewRepresentable {
             return NSImage(systemSymbolName: "doc", accessibilityDescription: nil)
         }
 
-        @objc private func nameFieldEdited(_ sender: NSTextField) {
-            guard let tableView = tableView else { return }
-            let row = tableView.row(for: sender)
+        private func commitRename(row: Int, newNameRaw: String) {
+            let newName = newNameRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !newName.isEmpty else { return }
             guard row >= 0, row < parent.nodes.count else { return }
+
             let node = parent.nodes[row]
-            parent.viewModel.rename(node: node, to: sender.stringValue)
+            guard newName != node.name else { return }
+
+            parent.viewModel.rename(node: node, to: newName)
+        }
+
+        func controlTextDidEndEditing(_ obj: Notification) {
+            guard let tableView = tableView else { return }
+
+            if let textField = obj.object as? NSTextField {
+                let row = tableView.row(for: textField)
+                commitRename(row: row, newNameRaw: textField.stringValue)
+            } else if let textView = obj.object as? NSTextView,
+                      let textField = textView.delegate as? NSTextField {
+                let row = tableView.row(for: textField)
+                commitRename(row: row, newNameRaw: textView.string)
+            }
         }
 
         func tableViewSelectionDidChange(_ notification: Notification) {
             cancelPendingRename()
             lastSelectionChange = Date()
             guard let tableView = tableView else { return }
+            if tableView.editedRow != -1 || tableView.currentEditor() != nil {
+                return
+            }
             let indexes = tableView.selectedRowIndexes
             var ids = Set<PakNode.ID>()
             for index in indexes {
@@ -297,7 +321,7 @@ struct PakListView: NSViewRepresentable {
             updateTypeSelectionBuffer(with: input)
 
             guard let match = findMatch(for: typeSelectionBuffer, in: tableView) else {
-                // No match – consume the event so we don't get the system beep.
+                // No match  consume the event so we don't get the system beep.
                 return true
             }
 
@@ -309,7 +333,7 @@ struct PakListView: NSViewRepresentable {
         private func updateTypeSelectionBuffer(with input: String) {
             let now = Date()
             if now.timeIntervalSince(lastTypeSelectionDate) > typeSelectionResetInterval {
-                // Too much time has passed – start a new sequence.
+                // Too much time has passed  start a new sequence.
                 typeSelectionBuffer = ""
             } else if typeSelectionBuffer.count == 1, typeSelectionBuffer == input {
                 // Repeatedly pressing the same key within the interval should
@@ -375,13 +399,7 @@ struct PakListView: NSViewRepresentable {
                 let nameColumn = tableView.column(withIdentifier: self.nameColumnIdentifier)
                 guard nameColumn != -1 else { return }
 
-                if let cell = tableView.view(atColumn: nameColumn, row: row, makeIfNecessary: false) as? NSTableCellView,
-                   let textField = cell.textField {
-                    tableView.window?.makeFirstResponder(textField)
-                    textField.selectText(nil)
-                } else {
-                    tableView.editColumn(nameColumn, row: row, with: event, select: true)
-                }
+                tableView.editColumn(nameColumn, row: row, with: nil, select: true)
             }
             renameWorkItem = workItem
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: workItem)
@@ -430,7 +448,7 @@ struct PakListView: NSViewRepresentable {
 
             menu.addItem(.separator())
 
-            let addFilesItem = NSMenuItem(title: "Add File(s)…", action: #selector(addFiles(_:)), keyEquivalent: "")
+            let addFilesItem = NSMenuItem(title: "Add File(s)", action: #selector(addFiles(_:)), keyEquivalent: "")
             addFilesItem.target = self
             addFilesItem.isEnabled = parent.viewModel.canAddFiles
             menu.addItem(addFilesItem)
@@ -441,6 +459,11 @@ struct PakListView: NSViewRepresentable {
             menu.addItem(newFolderItem)
 
             menu.addItem(.separator())
+
+            let renameItem = NSMenuItem(title: "Rename", action: #selector(renameFromMenu(_:)), keyEquivalent: "")
+            renameItem.target = self
+            renameItem.representedObject = row
+            menu.addItem(renameItem)
 
             let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteSelection(_:)), keyEquivalent: "")
             deleteItem.target = self
@@ -480,6 +503,19 @@ struct PakListView: NSViewRepresentable {
 
         @objc private func deleteSelection(_ sender: NSMenuItem) {
             parent.viewModel.deleteSelectedFile()
+        }
+
+        @objc private func renameFromMenu(_ sender: NSMenuItem) {
+            cancelPendingRename()
+            guard let tableView = tableView,
+                  let row = sender.representedObject as? Int,
+                  row >= 0, row < parent.nodes.count else { return }
+
+            let nameColumn = tableView.column(withIdentifier: nameColumnIdentifier)
+            guard nameColumn != -1 else { return }
+
+            tableView.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+            tableView.editColumn(nameColumn, row: row, with: nil, select: true)
         }
 
         private func open(node: PakNode) {

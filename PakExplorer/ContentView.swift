@@ -114,8 +114,6 @@ struct ContentView: View {
     private var detailView: some View {
         VStack(spacing: 0) {
             if let folder = model.currentFolder {
-                let sortedChildren = (folder.children ?? []).sorted(using: sortOrder)
-                
                 VStack(spacing: 0) {
                     HStack {
                         Picker("Detail View", selection: $detailViewStyle) {
@@ -133,10 +131,11 @@ struct ContentView: View {
 
                     Divider()
 
+                    let sortedChildren = (folder.children ?? []).sorted(using: sortOrder)
                     Group {
                         switch detailViewStyle {
                         case .list:
-                            listView(sortedChildren)
+                            listView(for: folder)
                         case .icons:
                             iconsView(sortedChildren)
                         }
@@ -359,9 +358,18 @@ struct ContentView: View {
         }
     }
     @ViewBuilder
-    private func listView(_ children: [PakNode]) -> some View {
+    private func listView(for folder: PakNode) -> some View {
+        let nodesBinding = Binding<[PakNode]>(
+            get: {
+                (folder.children ?? []).sorted(using: sortOrder)
+            },
+            set: { newValue in
+                folder.children = newValue
+            }
+        )
+
         PakListView(
-            nodes: children,
+            nodes: nodesBinding,
             selection: $selectedFileIDs,
             sortOrder: $sortOrder,
             viewModel: model,

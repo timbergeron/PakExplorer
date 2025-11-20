@@ -120,15 +120,33 @@ final class PakViewModel: ObservableObject {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != node.name else { return }
 
-        node.name = trimmed
-        if let entry = node.entry {
-            let updatedPath: String
-            if let slashIndex = entry.name.lastIndex(of: "/") {
-                let prefix = entry.name[..<entry.name.index(after: slashIndex)]
-                updatedPath = String(prefix) + trimmed
-            } else {
-                updatedPath = trimmed
+        // Calculate potential path length
+        let currentEntryName = node.entry?.name ?? node.name
+        let parentPath: String
+        if let slashIndex = currentEntryName.lastIndex(of: "/") {
+            parentPath = String(currentEntryName[..<currentEntryName.index(after: slashIndex)])
+        } else {
+            parentPath = ""
+        }
+
+        // Enforce 56-byte limit for the full path
+        let maxPathLength = 55 // 56 bytes null-terminated
+        let parentLength = parentPath.utf8.count
+        let maxNameLength = maxPathLength - parentLength
+        
+        var validName = trimmed
+        if validName.utf8.count > maxNameLength {
+            let allowedBytes = validName.utf8.prefix(maxNameLength)
+            if let truncated = String(allowedBytes) {
+                validName = truncated
             }
+        }
+        
+        guard !validName.isEmpty else { return }
+
+        node.name = validName
+        if let entry = node.entry {
+            let updatedPath = parentPath + validName
             node.entry = PakEntry(name: updatedPath, offset: entry.offset, length: entry.length)
         }
         markDirty()
