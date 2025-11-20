@@ -168,6 +168,13 @@ struct ContentView: View {
                     return true
                 }
                 .contextMenu {
+                    Button("Paste") {
+                        let inserted = model.pasteIntoCurrentFolder()
+                        if !inserted.isEmpty {
+                            selectedFileIDs = Set(inserted.map { $0.id })
+                        }
+                    }
+                    .disabled(!model.canPaste)
                     Button("New Folder") {
                         createFolder(at: folder)
                     }
@@ -360,6 +367,21 @@ struct ContentView: View {
             viewModel: model,
             onOpenFolder: { folder in
                 model.navigate(to: folder)
+            },
+            onNewFolder: {
+                createFolder(at: model.currentFolder)
+            },
+            onAddFiles: {
+                presentAddFilesPanel(target: model.currentFolder)
+            },
+            onCut: {
+                model.cutSelection()
+            },
+            onCopy: {
+                model.copySelection()
+            },
+            onPaste: {
+                model.pasteIntoCurrentFolder()
             }
         )
     }
@@ -373,6 +395,21 @@ struct ContentView: View {
             viewModel: model,
             onOpenFolder: { folder in
                 model.navigate(to: folder)
+            },
+            onNewFolder: {
+                createFolder(at: model.currentFolder)
+            },
+            onAddFiles: {
+                presentAddFilesPanel(target: model.currentFolder)
+            },
+            onCut: {
+                model.cutSelection()
+            },
+            onCopy: {
+                model.copySelection()
+            },
+            onPaste: {
+                model.pasteIntoCurrentFolder()
             }
         )
     }
@@ -404,6 +441,13 @@ struct PakCommands {
     let zoomOutIcons: () -> Void
     let canZoomInIcons: Bool
     let canZoomOutIcons: Bool
+    let cut: () -> Void
+    let copy: () -> Void
+    let paste: () -> Void
+    let canCutCopy: Bool
+    let canPaste: Bool
+    let selectAll: () -> Void
+    let canSelectAll: Bool
 }
 
 struct PakCommandsKey: FocusedValueKey {
@@ -513,7 +557,25 @@ private extension ContentView {
                 }
             },
             canZoomInIcons: detailViewStyle == .icons && iconZoomLevel < 2,
-            canZoomOutIcons: detailViewStyle == .icons && iconZoomLevel > 0
+            canZoomOutIcons: detailViewStyle == .icons && iconZoomLevel > 0,
+            cut: {
+                model.cutSelection()
+            },
+            copy: {
+                model.copySelection()
+            },
+            paste: {
+                let inserted = model.pasteIntoCurrentFolder()
+                if !inserted.isEmpty {
+                    selectedFileIDs = Set(inserted.map { $0.id })
+                }
+            },
+            canCutCopy: model.canCutCopy,
+            canPaste: model.canPaste,
+            selectAll: {
+                selectAllInCurrentFolder()
+            },
+            canSelectAll: canSelectAllInCurrentFolder
         )
     }
 
@@ -524,6 +586,17 @@ private extension ContentView {
         if let folder = parent {
             model.navigate(to: folder)
         }
+    }
+
+    func selectAllInCurrentFolder() {
+        guard let folder = model.currentFolder else { return }
+        let ids = Set((folder.children ?? []).map { $0.id })
+        updateSelection(ids: ids, in: folder)
+    }
+
+    var canSelectAllInCurrentFolder: Bool {
+        guard let folder = model.currentFolder else { return false }
+        return !(folder.children ?? []).isEmpty
     }
 
     func presentAddFilesPanel(target folder: PakNode?) {

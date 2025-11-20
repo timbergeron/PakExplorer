@@ -36,10 +36,11 @@ struct PakExplorerApp: App {
         }
         .commands {
             PakAboutCommands()
+            PakOpenCommands()
             PakNewCommands()
             PakSaveCommands()
+            PakEditCommands()
             PakViewCommands()
-            // "Open" is handled by DocumentGroup automatically
         }
     }
 }
@@ -66,14 +67,6 @@ struct PakSaveCommands: Commands {
             .keyboardShortcut("S", modifiers: [.command, .shift])
             .disabled(pakCommands == nil)
 
-            Button(role: .destructive) {
-                pakCommands?.deleteFile()
-            } label: {
-                Label("Delete File", systemImage: "trash")
-            }
-            .keyboardShortcut(.delete, modifiers: [.command])
-            .disabled(!(pakCommands?.canDeleteFile ?? false))
-            
             Divider()
 
             Button {
@@ -89,6 +82,61 @@ struct PakSaveCommands: Commands {
                 Label("Close All", systemImage: "xmark.circle.fill")
             }
             .keyboardShortcut("W", modifiers: [.command, .option])
+        }
+    }
+}
+
+struct PakEditCommands: Commands {
+    @FocusedValue(\.pakCommands) private var pakCommands
+
+    var body: some Commands {
+        CommandGroup(replacing: .pasteboard) {
+            Button("Cut") {
+                pakCommands?.cut()
+            }
+            .keyboardShortcut("X")
+            .disabled(!(pakCommands?.canCutCopy ?? false))
+
+            Button("Copy") {
+                pakCommands?.copy()
+            }
+            .keyboardShortcut("C")
+            .disabled(!(pakCommands?.canCutCopy ?? false))
+
+            Button("Paste") {
+                _ = pakCommands?.paste()
+            }
+            .keyboardShortcut("V")
+            .disabled(!(pakCommands?.canPaste ?? false))
+
+            Button("Select All") {
+                pakCommands?.selectAll()
+            }
+            .keyboardShortcut("A")
+            .disabled(!(pakCommands?.canSelectAll ?? false))
+
+            Divider()
+
+            Button(role: .destructive) {
+                pakCommands?.deleteFile()
+            } label: {
+                Text("Delete")
+            }
+            .keyboardShortcut(.delete, modifiers: [.command])
+            .disabled(!(pakCommands?.canDeleteFile ?? false))
+        }
+    }
+}
+
+struct PakOpenCommands: Commands {
+    var body: some Commands {
+        CommandGroup(after: .newItem) {
+            Button {
+                NSApp.sendAction(#selector(NSDocumentController.openDocument(_:)), to: nil, from: nil)
+            } label: {
+                Label("Open…", systemImage: "folder")
+            }
+            .keyboardShortcut("O")
         }
     }
 }

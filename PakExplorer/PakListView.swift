@@ -6,6 +6,7 @@ import Foundation
 // Finder-style type-to-select behavior without triggering system beeps.
 private final class PakListTableView: NSTableView {
     var onHandledKeyDown: ((NSEvent) -> Bool)?
+    var contextMenuProvider: ((Int) -> NSMenu?)?
 
     override func keyDown(with event: NSEvent) {
         if let handler = onHandledKeyDown, handler(event) {
@@ -13,6 +14,24 @@ private final class PakListTableView: NSTableView {
             return
         }
         super.keyDown(with: event)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let point = convert(event.locationInWindow, from: nil)
+        let row = self.row(at: point)
+        guard row >= 0, row < numberOfRows else {
+            return super.menu(for: event)
+        }
+
+        if !selectedRowIndexes.contains(row) {
+            selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+        }
+
+        if let menu = contextMenuProvider?(row) {
+            return menu
+        }
+
+        return super.menu(for: event)
     }
 }
 
@@ -22,6 +41,11 @@ struct PakListView: NSViewRepresentable {
     @Binding var sortOrder: [KeyPathComparator<PakNode>]
     var viewModel: PakViewModel
     var onOpenFolder: (PakNode) -> Void
+    var onNewFolder: () -> Void
+    var onAddFiles: () -> Void
+    var onCut: () -> Void
+    var onCopy: () -> Void
+    var onPaste: () -> [PakNode]
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -67,6 +91,9 @@ struct PakListView: NSViewRepresentable {
         tableView.headerView = NSTableHeaderView()
         tableView.onHandledKeyDown = { [weak coordinator = context.coordinator] event in
             coordinator?.handleKeyDown(event) ?? false
+        }
+        tableView.contextMenuProvider = { [weak coordinator = context.coordinator] row in
+            coordinator?.contextMenu(forRow: row)
         }
 
         let scrollView = NSScrollView()
@@ -366,14 +393,101 @@ struct PakListView: NSViewRepresentable {
             let row = tableView.clickedRow
             guard row >= 0 && row < parent.nodes.count else { return }
             let node = parent.nodes[row]
-            if node.isFolder {
-                parent.onOpenFolder(node)
-            }
+            open(node: node)
         }
 
         func cancelPendingRename() {
             renameWorkItem?.cancel()
             renameWorkItem = nil
+        }
+
+        func contextMenu(forRow row: Int) -> NSMenu? {
+            guard row >= 0, row < parent.nodes.count else { return nil }
+            let node = parent.nodes[row]
+
+            let menu = NSMenu()
+            let openItem = NSMenuItem(title: "Open", action: #selector(openFromMenu(_:)), keyEquivalent: "")
+            openItem.target = self
+            openItem.representedObject = node
+            menu.addItem(openItem)
+
+            menu.addItem(.separator())
+
+            let cutItem = NSMenuItem(title: "Cut", action: #selector(cutSelection(_:)), keyEquivalent: "")
+            cutItem.target = self
+            cutItem.isEnabled = parent.viewModel.canCutCopy
+            menu.addItem(cutItem)
+
+            let copyItem = NSMenuItem(title: "Copy", action: #selector(copySelection(_:)), keyEquivalent: "")
+            copyItem.target = self
+            copyItem.isEnabled = parent.viewModel.canCutCopy
+            menu.addItem(copyItem)
+
+            let pasteItem = NSMenuItem(title: "Paste", action: #selector(pasteIntoCurrentFolder(_:)), keyEquivalent: "")
+            pasteItem.target = self
+            pasteItem.isEnabled = parent.viewModel.canPaste
+            menu.addItem(pasteItem)
+
+            menu.addItem(.separator())
+
+            let addFilesItem = NSMenuItem(title: "Add File(s)…", action: #selector(addFiles(_:)), keyEquivalent: "")
+            addFilesItem.target = self
+            addFilesItem.isEnabled = parent.viewModel.canAddFiles
+            menu.addItem(addFilesItem)
+
+            let newFolderItem = NSMenuItem(title: "New Folder", action: #selector(newFolder(_:)), keyEquivalent: "")
+            newFolderItem.target = self
+            newFolderItem.isEnabled = parent.viewModel.canCreateFolder
+            menu.addItem(newFolderItem)
+
+            menu.addItem(.separator())
+
+            let deleteItem = NSMenuItem(title: "Delete", action: #selector(deleteSelection(_:)), keyEquivalent: "")
+            deleteItem.target = self
+            deleteItem.isEnabled = parent.viewModel.canDeleteFile
+            menu.addItem(deleteItem)
+            return menu
+        }
+
+        @objc private func openFromMenu(_ sender: NSMenuItem) {
+            guard let node = sender.representedObject as? PakNode else { return }
+            open(node: node)
+        }
+
+        @objc private func cutSelection(_ sender: NSMenuItem) {
+            parent.onCut()
+        }
+
+        @objc private func copySelection(_ sender: NSMenuItem) {
+            parent.onCopy()
+        }
+
+        @objc private func pasteIntoCurrentFolder(_ sender: NSMenuItem) {
+            let newNodes = parent.onPaste()
+            if !newNodes.isEmpty {
+                parent.selection = Set(newNodes.map { $0.id })
+                tableView?.reloadData()
+            }
+        }
+
+        @objc private func addFiles(_ sender: NSMenuItem) {
+            parent.onAddFiles()
+        }
+
+        @objc private func newFolder(_ sender: NSMenuItem) {
+            parent.onNewFolder()
+        }
+
+        @objc private func deleteSelection(_ sender: NSMenuItem) {
+            parent.viewModel.deleteSelectedFile()
+        }
+
+        private func open(node: PakNode) {
+            if node.isFolder {
+                parent.onOpenFolder(node)
+            } else {
+                parent.viewModel.openInDefaultApp(node: node)
+            }
         }
     }
 }

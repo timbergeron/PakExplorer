@@ -190,7 +190,7 @@ struct PakLoader {
         return root
     }
 
-    private static func sortNodeRecursively(_ node: PakNode) {
+    static func sortNodeRecursively(_ node: PakNode) {
         node.children?.sort {
             // Folders first, then files, then alpha
             if $0.isFolder != $1.isFolder {
@@ -229,7 +229,7 @@ struct PakLoader {
         return PakFile(name: name, data: Data(), entries: [], root: root)
     }
 
-    private static func buildTree(from directory: URL, into parent: PakNode) throws {
+    static func buildTree(from directory: URL, into parent: PakNode) throws {
         let contents = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil, options: [])
         for item in contents {
             var isDir: ObjCBool = false

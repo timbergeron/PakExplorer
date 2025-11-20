@@ -15,6 +15,11 @@ final class PakViewModel: ObservableObject {
     @Published private(set) var hasUnsavedChanges = false
     @Published private var backStack: [PakNode] = []
     @Published private var forwardStack: [PakNode] = []
+    private static var sharedClipboard: ClipboardPayload?
+    private var clipboard: ClipboardPayload? {
+        get { Self.sharedClipboard }
+        set { Self.sharedClipboard = newValue }
+    }
     private static let previewableImageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "tif", "tiff", "bmp", "heic", "heif", "tga"]
     var documentURL: URL?
     private var isNavigatingHistory = false
@@ -31,6 +36,16 @@ final class PakViewModel: ObservableObject {
         !forwardStack.isEmpty
     }
 
+    var canCutCopy: Bool {
+        !selectedNodes.isEmpty
+    }
+
+    var canPaste: Bool {
+        guard currentFolder != nil else { return false }
+        if clipboard != nil { return true }
+        return !pasteboardFileURLs().isEmpty
+    }
+
     init(pakFile: PakFile?, documentURL: URL? = nil) {
         self.pakFile = pakFile
         self.documentURL = documentURL
@@ -43,6 +58,28 @@ final class PakViewModel: ObservableObject {
 
     enum ExportError: Error {
         case missingData
+    }
+
+    private final class ClipboardPayload {
+        let nodes: [PakNode]       // Deep copies used as templates for pasting
+        let isCut: Bool
+        let originalIDs: [PakNode.ID]
+        let exportedURLs: [URL]    // Temp file URLs for Finder paste
+        weak var sourceModel: PakViewModel?
+
+        init(
+            nodes: [PakNode],
+            isCut: Bool,
+            originalIDs: [PakNode.ID],
+            exportedURLs: [URL],
+            sourceModel: PakViewModel?
+        ) {
+            self.nodes = nodes
+            self.isCut = isCut
+            self.originalIDs = originalIDs
+            self.exportedURLs = exportedURLs
+            self.sourceModel = sourceModel
+        }
     }
 
     func exportToTemporaryLocation(node: PakNode) throws -> URL {
@@ -62,6 +99,21 @@ final class PakViewModel: ObservableObject {
         let destination = base.appendingPathComponent(node.name)
         try data.write(to: destination)
         return destination
+    }
+
+    func openInDefaultApp(node: PakNode) {
+        guard !node.isFolder else { return }
+
+        do {
+            let url = try exportToTemporaryLocation(node: node)
+            NSWorkspace.shared.open(url)
+        } catch {
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Unable to open \(node.name)"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
     }
 
     func rename(node: PakNode, to newName: String) {
@@ -108,6 +160,247 @@ final class PakViewModel: ObservableObject {
             try PakFilesystemExporter.export(node: node, originalData: pakFile?.data, to: destination)
         }
         return base
+    }
+
+    func copySelection() {
+        createClipboard(isCut: false)
+    }
+
+    func cutSelection() {
+        createClipboard(isCut: true)
+    }
+
+    @discardableResult
+    func pasteIntoCurrentFolder() -> [PakNode] {
+        guard let destination = currentFolder else { return [] }
+
+        if let payload = clipboard {
+            if payload.isCut,
+               let source = payload.sourceModel {
+                for id in payload.originalIDs {
+                    if let original = findNode(with: id, in: source.pakFile?.root),
+                       isDescendant(destination, of: original) {
+                        let alert = NSAlert()
+                        alert.alertStyle = .warning
+                        alert.messageText = "Cannot Move Into Itself"
+                        alert.informativeText = "You cannot move a folder into itself or one of its subfolders."
+                        alert.runModal()
+                        return []
+                    }
+                }
+                source.removeNodes(withIDs: Set(payload.originalIDs), from: source.pakFile?.root)
+                source.markDirty()
+            }
+
+            var inserted: [PakNode] = []
+            for template in payload.nodes {
+                let clone = cloneNode(template)
+                clone.name = availableName(for: clone.name, in: destination)
+                insert(node: clone, into: destination)
+                inserted.append(clone)
+            }
+
+            sortFolder(destination)
+            markDirty()
+
+            if payload.isCut {
+                clipboard = nil
+            }
+
+            selectedNodes = inserted
+            selectedFile = inserted.first
+            return inserted
+        }
+
+        let urls = pasteboardFileURLs()
+        guard !urls.isEmpty else { return [] }
+        let inserted = pasteFileURLs(urls, into: destination)
+        return inserted
+    }
+
+    private func createClipboard(isCut: Bool) {
+        guard !selectedNodes.isEmpty else { return }
+
+        do {
+            let exportedURLs = try exportSelectionForPasteboard(nodes: selectedNodes)
+            let snapshots = selectedNodes.map { cloneNodeForClipboard($0) }
+            let ids = isCut ? selectedNodes.map { $0.id } : []
+            clipboard = ClipboardPayload(
+                nodes: snapshots,
+                isCut: isCut,
+                originalIDs: ids,
+                exportedURLs: exportedURLs,
+                sourceModel: isCut ? self : nil
+            )
+            prepareFinderPasteboard(with: exportedURLs)
+        } catch {
+            let alert = NSAlert(error: error)
+            alert.alertStyle = .warning
+            alert.messageText = "Copy failed"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
+    private func cloneNodeForClipboard(_ node: PakNode) -> PakNode {
+        let copy = PakNode(name: node.name)
+        if node.isFolder {
+            copy.children = node.children?.map { cloneNodeForClipboard($0) }
+        } else {
+            if let data = node.localData {
+                copy.localData = data
+            } else if let data = extractData(for: node) {
+                copy.localData = data
+            }
+            copy.entry = nil
+        }
+        return copy
+    }
+
+    private func cloneNode(_ node: PakNode) -> PakNode {
+        let copy = PakNode(name: node.name)
+        if node.isFolder {
+            copy.children = node.children?.map { cloneNode($0) }
+        } else {
+            copy.localData = node.localData
+            copy.entry = node.entry
+        }
+        return copy
+    }
+
+    private func availableName(for originalName: String, in folder: PakNode) -> String {
+        let existing = Set((folder.children ?? []).map { $0.name.lowercased() })
+        if !existing.contains(originalName.lowercased()) {
+            return originalName
+        }
+
+        let ext = (originalName as NSString).pathExtension
+        let base = (originalName as NSString).deletingPathExtension
+
+        var attempt = 1
+        while true {
+            let suffix = attempt == 1 ? " copy" : " copy \(attempt)"
+            let candidateBase = base + suffix
+            let candidate = ext.isEmpty ? candidateBase : "\(candidateBase).\(ext)"
+            if !existing.contains(candidate.lowercased()) {
+                return candidate
+            }
+            attempt += 1
+        }
+    }
+
+    private func insert(node: PakNode, into folder: PakNode) {
+        if folder.children == nil { folder.children = [] }
+        folder.children?.append(node)
+    }
+
+    private func removeNodes(withIDs ids: Set<PakNode.ID>, from root: PakNode?) {
+        guard let root else { return }
+        if var children = root.children {
+            children.removeAll { ids.contains($0.id) }
+            root.children = children
+        }
+        for child in root.children ?? [] where child.isFolder {
+            removeNodes(withIDs: ids, from: child)
+        }
+    }
+
+    private func findNode(with id: PakNode.ID, in root: PakNode?) -> PakNode? {
+        guard let root else { return nil }
+        if root.id == id { return root }
+        for child in root.children ?? [] {
+            if child.id == id {
+                return child
+            }
+            if let found = findNode(with: id, in: child) {
+                return found
+            }
+        }
+        return nil
+    }
+
+    private func isDescendant(_ node: PakNode, of possibleAncestor: PakNode) -> Bool {
+        for child in possibleAncestor.children ?? [] {
+            if child === node {
+                return true
+            }
+            if isDescendant(node, of: child) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func pasteboardFileURLs() -> [URL] {
+        let pasteboard = NSPasteboard.general
+        let classes = [NSURL.self]
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [
+            .urlReadingFileURLsOnly: true
+        ]
+        let objects = pasteboard.readObjects(forClasses: classes, options: options) as? [URL] ?? []
+        return objects
+    }
+
+    private func pasteFileURLs(_ urls: [URL], into folder: PakNode) -> [PakNode] {
+        var inserted: [PakNode] = []
+        for url in urls {
+            if let node = createNodeFromFileURL(url, in: folder) {
+                insert(node: node, into: folder)
+                inserted.append(node)
+            }
+        }
+        sortFolder(folder)
+        markDirty()
+        selectedNodes = inserted
+        selectedFile = inserted.first
+        return inserted
+    }
+
+    private func createNodeFromFileURL(_ url: URL, in folder: PakNode) -> PakNode? {
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else { return nil }
+        let name = availableName(for: url.lastPathComponent, in: folder)
+
+        if isDir.boolValue {
+            let node = PakNode(name: name)
+            do {
+                try PakLoader.buildTree(from: url, into: node)
+                PakLoader.sortNodeRecursively(node)
+                return node
+            } catch {
+                return nil
+            }
+        }
+
+        do {
+            let data = try Data(contentsOf: url)
+            let node = PakNode(name: name)
+            node.localData = data
+            return node
+        } catch {
+            return nil
+        }
+    }
+
+    private func exportSelectionForPasteboard(nodes: [PakNode]) throws -> [URL] {
+        guard !nodes.isEmpty else { return [] }
+
+        if nodes.count == 1, let first = nodes.first {
+            let url = try exportToTemporaryLocation(node: first)
+            return [url]
+        }
+
+        let base = try exportSelectionToTemporaryLocation(nodes: nodes)
+        return nodes.map { node in
+            base.appendingPathComponent(node.name, isDirectory: node.isFolder)
+        }
+    }
+
+    private func prepareFinderPasteboard(with urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects(urls as [NSURL])
     }
 
 
