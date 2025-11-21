@@ -15,7 +15,7 @@
 			<string>Default</string>
 			<key>LSItemContentTypes</key>
 			<array>
-				<string>com.timbergeron.pakexplorer.pak</string>
+				<string>com.timbergeron.PakScape.pak</string>
 			</array>
 		</dict>
 		<dict>
@@ -27,7 +27,7 @@
 			<string>Default</string>
 			<key>LSItemContentTypes</key>
 			<array>
-				<string>com.timbergeron.pakexplorer.pk3</string>
+				<string>com.timbergeron.PakScape.pk3</string>
 			</array>
 		</dict>
 	</array>
@@ -61,7 +61,7 @@
 			<key>UTTypeDescription</key>
 			<string>Quake PAK archive</string>
 			<key>UTTypeIdentifier</key>
-			<string>com.timbergeron.pakexplorer.pak</string>
+			<string>com.timbergeron.PakScape.pak</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>
@@ -83,7 +83,7 @@
 			<key>UTTypeDescription</key>
 			<string>Quake PK3 archive</string>
 			<key>UTTypeIdentifier</key>
-			<string>com.timbergeron.pakexplorer.pk3</string>
+			<string>com.timbergeron.PakScape.pk3</string>
 			<key>UTTypeTagSpecification</key>
 			<dict>
 				<key>public.filename-extension</key>

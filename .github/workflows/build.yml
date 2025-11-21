@@ -17,8 +17,8 @@ jobs:
       - name: Build Release
         run: |
           xcodebuild \
-            -project PakExplorer.xcodeproj \
-            -scheme PakExplorer \
+            -project PakScape.xcodeproj \
+            -scheme PakScape \
             -configuration Release \
             -derivedDataPath build \
             CODE_SIGNING_REQUIRED=NO \
@@ -26,15 +26,15 @@ jobs:
 
       - name: Package App
         run: |
-          APP_PATH="build/Build/Products/Release/PakExplorer.app"
+          APP_PATH="build/Build/Products/Release/PakScape.app"
           if [ ! -d "$APP_PATH" ]; then
             echo "App bundle not found at $APP_PATH"
             exit 1
           fi
-          ditto -c -k --keepParent "$APP_PATH" PakExplorer-macOS.zip
+          ditto -c -k --keepParent "$APP_PATH" PakScape-macOS.zip
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PakExplorer-macOS
-          path: PakExplorer-macOS.zip
+          name: PakScape-macOS
+          path: PakScape-macOS.zip

@@ -7,7 +7,7 @@ struct PreferencesView: View {
 
     var body: some View {
         Form {
-            Toggle("Show PakExplorer actions in Finder's contextual menu", isOn: $actionsEnabled)
+            Toggle("Show PakScape actions in Finder's contextual menu", isOn: $actionsEnabled)
                 .onChange(of: actionsEnabled) { _, newValue in
                     FinderServiceManager.shared.updateRegistration(isEnabled: newValue)
                 }

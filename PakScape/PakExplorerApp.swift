@@ -21,7 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 @main
-struct PakExplorerApp: App {
+struct PakScapeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     init() {
@@ -180,7 +180,7 @@ struct PakAboutCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .appInfo) {
-            Button("About PakExplorer") {
+            Button("About PakScape") {
                 aboutPresenter.show()
             }
         }
@@ -237,7 +237,7 @@ private final class AboutWindowPresenter {
             defer: false
         )
 
-        window.title = "About PakExplorer"
+        window.title = "About PakScape"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
@@ -279,8 +279,8 @@ private final class AboutWindowPresenter {
 }
 
 private struct AboutView: View {
-    private let urlString = "https://github.com/timbergeron/PakExplorer"
-    private let displayString = "github.com/timbergeron/PakExplorer"
+    private let urlString = "https://github.com/timbergeron/PakScape"
+    private let displayString = "github.com/timbergeron/PakScape"
     private var versionText: String? {
         let bundle = Bundle.main
         guard let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String else {
@@ -299,7 +299,7 @@ private struct AboutView: View {
                     .shadow(radius: 2)
             }
 
-            Text("PakExplorer")
+            Text("PakScape")
                 .font(.title2.weight(.semibold))
 
             Text("Simple Quake `.pak` & `.pk3` explorer inspired by PakScape and originally developed by Peter Engström.")

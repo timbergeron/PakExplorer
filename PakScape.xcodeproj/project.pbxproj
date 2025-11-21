@@ -7,14 +7,14 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		85121D9F2ECD6CE600FCB4CC /* PakExplorer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PakExplorer.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		85121D9F2ECD6CE600FCB4CC /* PakScape.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PakScape.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		85121DAF2ECD6CE600FCB4DD /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		85121DA12ECD6CE600FCB4CC /* PakExplorer */ = {
+		85121DA12ECD6CE600FCB4CC /* PakScape */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = PakExplorer;
+			path = PakScape;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -34,7 +34,7 @@
 			isa = PBXGroup;
 			children = (
 				85121DAF2ECD6CE600FCB4DD /* Info.plist */,
-				85121DA12ECD6CE600FCB4CC /* PakExplorer */,
+				85121DA12ECD6CE600FCB4CC /* PakScape */,
 				85121DA02ECD6CE600FCB4CC /* Products */,
 			);
 			sourceTree = "<group>";
@@ -42,7 +42,7 @@
 		85121DA02ECD6CE600FCB4CC /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				85121D9F2ECD6CE600FCB4CC /* PakExplorer.app */,
+				85121D9F2ECD6CE600FCB4CC /* PakScape.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -50,9 +50,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		85121D9E2ECD6CE600FCB4CC /* PakExplorer */ = {
+		85121D9E2ECD6CE600FCB4CC /* PakScape */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 85121DAA2ECD6CE700FCB4CC /* Build configuration list for PBXNativeTarget "PakExplorer" */;
+			buildConfigurationList = 85121DAA2ECD6CE700FCB4CC /* Build configuration list for PBXNativeTarget "PakScape" */;
 			buildPhases = (
 				85121D9B2ECD6CE600FCB4CC /* Sources */,
 				85121D9C2ECD6CE600FCB4CC /* Frameworks */,
@@ -63,13 +63,13 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				85121DA12ECD6CE600FCB4CC /* PakExplorer */,
+				85121DA12ECD6CE600FCB4CC /* PakScape */,
 			);
-			name = PakExplorer;
+			name = PakScape;
 			packageProductDependencies = (
 			);
-			productName = PakExplorer;
-			productReference = 85121D9F2ECD6CE600FCB4CC /* PakExplorer.app */;
+			productName = PakScape;
+			productReference = 85121D9F2ECD6CE600FCB4CC /* PakScape.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -87,7 +87,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 85121D9A2ECD6CE600FCB4CC /* Build configuration list for PBXProject "PakExplorer" */;
+			buildConfigurationList = 85121D9A2ECD6CE600FCB4CC /* Build configuration list for PBXProject "PakScape" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -101,7 +101,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				85121D9E2ECD6CE600FCB4CC /* PakExplorer */,
+				85121D9E2ECD6CE600FCB4CC /* PakScape */,
 			);
 		};
 /* End PBXProject section */
@@ -264,7 +264,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = timbergeron.PakExplorer;
+				PRODUCT_BUNDLE_IDENTIFIER = timbergeron.PakScape;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -295,7 +295,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = timbergeron.PakExplorer;
+				PRODUCT_BUNDLE_IDENTIFIER = timbergeron.PakScape;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -310,7 +310,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		85121D9A2ECD6CE600FCB4CC /* Build configuration list for PBXProject "PakExplorer" */ = {
+		85121D9A2ECD6CE600FCB4CC /* Build configuration list for PBXProject "PakScape" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				85121DA82ECD6CE700FCB4CC /* Debug */,
@@ -319,7 +319,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		85121DAA2ECD6CE700FCB4CC /* Build configuration list for PBXNativeTarget "PakExplorer" */ = {
+		85121DAA2ECD6CE700FCB4CC /* Build configuration list for PBXNativeTarget "PakScape" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				85121DAB2ECD6CE700FCB4CC /* Debug */,
