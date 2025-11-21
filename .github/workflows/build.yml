@@ -27,14 +27,26 @@ jobs:
       - name: Package App
         run: |
           APP_PATH="build/Build/Products/Release/PakScape.app"
+          DMG_NAME="PakScape.dmg"
+          STAGING_DIR="dmg_staging"
+
           if [ ! -d "$APP_PATH" ]; then
             echo "App bundle not found at $APP_PATH"
             exit 1
           fi
-          ditto -c -k --keepParent "$APP_PATH" PakScape-macOS.zip
+
+          rm -rf "$STAGING_DIR"
+          mkdir "$STAGING_DIR"
+          ditto "$APP_PATH" "$STAGING_DIR/PakScape.app"
+
+          hdiutil create "$DMG_NAME" \
+            -volname "PakScape" \
+            -srcfolder "$STAGING_DIR" \
+            -ov \
+            -format UDZO
 
       - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: PakScape-macOS
-          path: PakScape-macOS.zip
+          name: PakScape
+          path: PakScape.dmg
