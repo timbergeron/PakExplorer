@@ -467,6 +467,9 @@ final class PakViewModel: ObservableObject {
         if ext == "mdl" {
             return MdlPreviewRenderer.renderImage(data: data)
         }
+        if ext == "spr" {
+            return SprPreviewRenderer.renderImage(data: data)
+        }
 
         guard Self.previewableImageExtensions.contains(ext) else { return nil }
         return NSImage(data: data)
@@ -762,6 +765,162 @@ private enum MdlPreviewRenderer {
 
         guard cursor + skinByteCount <= data.count else { return nil }
         return data.subdata(in: cursor ..< cursor + skinByteCount)
+    }
+
+    private static func image(from skin: Data, width: Int, height: Int) -> NSImage? {
+        let palette = QuakePalette.bytes
+        guard palette.count >= 768 else { return nil }
+
+        let pixelCountResult = width.multipliedReportingOverflow(by: height)
+        guard !pixelCountResult.overflow else { return nil }
+        let pixelCount = pixelCountResult.partialValue
+        guard skin.count >= pixelCount else { return nil }
+
+        let rgbaBytesResult = pixelCount.multipliedReportingOverflow(by: 4)
+        guard !rgbaBytesResult.overflow else { return nil }
+        var rgba = Data(count: rgbaBytesResult.partialValue)
+
+        var conversionSucceeded = true
+        rgba.withUnsafeMutableBytes { destBuffer in
+            guard let dest = destBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                conversionSucceeded = false
+                return
+            }
+
+            skin.withUnsafeBytes { srcBuffer in
+                guard let src = srcBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                    conversionSucceeded = false
+                    return
+                }
+
+                for i in 0..<pixelCount {
+                    let paletteIndex = Int(src[i])
+                    if paletteIndex == 255 {
+                        let destIndex = i * 4
+                        dest[destIndex] = 0
+                        dest[destIndex + 1] = 0
+                        dest[destIndex + 2] = 0
+                        dest[destIndex + 3] = 0
+                        continue
+                    }
+                    let paletteOffset = paletteIndex * 3
+                    guard paletteOffset + 2 < palette.count else {
+                        conversionSucceeded = false
+                        return
+                    }
+                    let destIndex = i * 4
+                    dest[destIndex] = palette[paletteOffset]
+                    dest[destIndex + 1] = palette[paletteOffset + 1]
+                    dest[destIndex + 2] = palette[paletteOffset + 2]
+                    dest[destIndex + 3] = 255
+                }
+            }
+        }
+
+        guard conversionSucceeded else { return nil }
+
+        guard let provider = CGDataProvider(data: rgba as CFData) else { return nil }
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        guard let cgImage = CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: true,
+            intent: .defaultIntent
+        ) else {
+            return nil
+        }
+
+        return NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
+    }
+
+    @inline(__always)
+    private static func readInt32LE(_ data: Data, offset: Int) -> Int? {
+        guard offset >= 0, offset + 4 <= data.count else { return nil }
+        return data.subdata(in: offset ..< offset + 4).withUnsafeBytes {
+            Int(Int32(littleEndian: $0.load(as: Int32.self)))
+        }
+    }
+}
+
+private enum SprPreviewRenderer {
+    private static let headerSize = 36
+    private static let spriteSingle = 0
+    private static let spriteGroup = 1
+
+    static func renderImage(data: Data) -> NSImage? {
+        guard data.count >= headerSize else { return nil }
+
+        // Magic ("IDSP") and version (expect 1) are advisory; be lenient.
+        let width = readInt32LE(data, offset: 16) ?? 0
+        let height = readInt32LE(data, offset: 20) ?? 0
+        let frames = readInt32LE(data, offset: 24) ?? 0
+        guard width > 0, height > 0, frames > 0 else { return nil }
+
+        guard let frame = firstFrame(in: data, defaultWidth: width, defaultHeight: height) else {
+            return nil
+        }
+        return image(from: frame.pixels, width: frame.width, height: frame.height)
+    }
+
+    private struct SpriteFrame {
+        let pixels: Data
+        let width: Int
+        let height: Int
+    }
+
+    private static func firstFrame(in data: Data, defaultWidth: Int, defaultHeight: Int) -> SpriteFrame? {
+        var cursor = headerSize
+        guard cursor + 4 <= data.count else { return nil }
+
+        var type = readInt32LE(data, offset: cursor) ?? spriteSingle
+        cursor += 4
+        if type != spriteSingle && type != spriteGroup {
+            type = spriteSingle
+            cursor -= 4
+        }
+
+        if type == spriteSingle {
+            return readFrame(data: data, cursor: &cursor, defaultWidth: defaultWidth, defaultHeight: defaultHeight)
+        }
+
+        guard cursor + 4 <= data.count else { return nil }
+        let groupCount = readInt32LE(data, offset: cursor) ?? 0
+        cursor += 4
+        guard groupCount > 0 else { return nil }
+
+        let intervalBytesResult = groupCount.multipliedReportingOverflow(by: MemoryLayout<Float32>.size)
+        guard !intervalBytesResult.overflow else { return nil }
+        let intervalBytes = intervalBytesResult.partialValue
+        guard cursor + intervalBytes <= data.count else { return nil }
+        cursor += intervalBytes
+
+        return readFrame(data: data, cursor: &cursor, defaultWidth: defaultWidth, defaultHeight: defaultHeight)
+    }
+
+    private static func readFrame(data: Data, cursor: inout Int, defaultWidth: Int, defaultHeight: Int) -> SpriteFrame? {
+        guard cursor + 16 <= data.count else { return nil }
+        // originX/originY are ignored for preview
+        let frameWidth = readInt32LE(data, offset: cursor + 8) ?? defaultWidth
+        let frameHeight = readInt32LE(data, offset: cursor + 12) ?? defaultHeight
+        cursor += 16
+
+        let pixelCountResult = frameWidth.multipliedReportingOverflow(by: frameHeight)
+        guard !pixelCountResult.overflow else { return nil }
+        let pixelCount = pixelCountResult.partialValue
+        guard pixelCount > 0 else { return nil }
+
+        guard cursor + pixelCount <= data.count else { return nil }
+        let pixels = data.subdata(in: cursor ..< cursor + pixelCount)
+        cursor += pixelCount
+        return SpriteFrame(pixels: pixels, width: frameWidth, height: frameHeight)
     }
 
     private static func image(from skin: Data, width: Int, height: Int) -> NSImage? {
