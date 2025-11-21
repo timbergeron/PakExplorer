@@ -470,6 +470,12 @@ final class PakViewModel: ObservableObject {
         if ext == "spr" {
             return SprPreviewRenderer.renderImage(data: data)
         }
+        if ext == "bsp" {
+            return BspPreviewRenderer.renderImage(fileName: node.name, data: data)
+        }
+        if ext == "wad" {
+            return WadPreviewRenderer.renderImage(fileName: node.name, data: data)
+        }
 
         guard Self.previewableImageExtensions.contains(ext) else { return nil }
         return NSImage(data: data)
@@ -995,6 +1001,393 @@ private enum SprPreviewRenderer {
         return data.subdata(in: offset ..< offset + 4).withUnsafeBytes {
             Int(Int32(littleEndian: $0.load(as: Int32.self)))
         }
+    }
+}
+
+private enum BspPreviewRenderer {
+    private static let interestedNames: Set<String> = [
+        "b_rock0.bsp", "b_rock1.bsp",
+        "b_shell0.bsp", "b_shell1.bsp",
+        "b_nail0.bsp", "b_nail1.bsp",
+        "b_explob.bsp",
+        "b_bh100.bsp", "b_bh25.bsp", "b_bh10.bsp",
+        "b_batt0.bsp", "b_batt1.bsp"
+    ]
+
+    private static let texturesLumpIndex = 2
+    private static let lumpCountBsp29 = 15
+    private static let lumpCountBsp23 = 14
+
+    static func renderImage(fileName: String, data: Data) -> NSImage? {
+        let lower = fileName.lowercased()
+        guard interestedNames.contains(lower) else { return nil }
+        guard data.count >= 4 else { return nil }
+
+        let version = readInt32LE(data, offset: 0) ?? 0
+        let lumpCount = version == 23 ? lumpCountBsp23 : lumpCountBsp29
+        guard lumpCount > texturesLumpIndex else { return nil }
+
+        let minHeaderBytes = 4 + lumpCount * 8
+        guard data.count >= minHeaderBytes else { return nil }
+
+        let textureLump = readLump(index: texturesLumpIndex, lumpCount: lumpCount, in: data)
+        guard let lump = textureLump,
+              lump.offset >= 0,
+              lump.length > 4,
+              lump.offset + lump.length <= data.count else {
+            return nil
+        }
+
+        let lumpStart = lump.offset
+        guard let textureCount = readInt32LE(data, offset: lumpStart), textureCount > 0 else {
+            return nil
+        }
+
+        let offsetsBytesResult = textureCount.multipliedReportingOverflow(by: 4)
+        guard !offsetsBytesResult.overflow else { return nil }
+        let offsetsBytes = offsetsBytesResult.partialValue
+        let offsetsTableEndResult = (lumpStart + 4).addingReportingOverflow(offsetsBytes)
+        guard !offsetsTableEndResult.overflow else { return nil }
+        let offsetsTableEnd = offsetsTableEndResult.partialValue
+        guard offsetsTableEnd <= lump.offset + lump.length, offsetsTableEnd <= data.count else {
+            return nil
+        }
+
+        guard let firstOffset = readInt32LE(data, offset: lumpStart + 4) else { return nil }
+        let mipBaseResult = lumpStart.addingReportingOverflow(firstOffset)
+        guard !mipBaseResult.overflow else { return nil }
+        let mipBase = mipBaseResult.partialValue
+        guard mipBase + 40 <= data.count,
+              mipBase + 40 <= lump.offset + lump.length else { return nil } // name + w/h + offsets
+
+        guard let width = readInt32LE(data, offset: mipBase + 16),
+              let height = readInt32LE(data, offset: mipBase + 20),
+              width > 0, height > 0 else {
+            return nil
+        }
+
+        guard let mipOffset = readInt32LE(data, offset: mipBase + 24), mipOffset >= 0 else {
+            return nil
+        }
+
+        let pixelCountResult = width.multipliedReportingOverflow(by: height)
+        guard !pixelCountResult.overflow else { return nil }
+        let pixelCount = pixelCountResult.partialValue
+        guard pixelCount > 0 else { return nil }
+
+        let pixelStartResult = mipBase.addingReportingOverflow(mipOffset)
+        guard !pixelStartResult.overflow else { return nil }
+        let pixelStart = pixelStartResult.partialValue
+        guard pixelStart >= 0,
+              pixelStart + pixelCount <= data.count,
+              pixelStart + pixelCount <= lump.offset + lump.length else { return nil }
+
+        let pixels = data.subdata(in: pixelStart ..< pixelStart + pixelCount)
+        return image(from: pixels, width: width, height: height)
+    }
+
+    private static func readLump(index: Int, lumpCount: Int, in data: Data) -> (offset: Int, length: Int)? {
+        guard index >= 0, index < lumpCount else { return nil }
+        let lumpOffset = 4 + index * 8
+        guard lumpOffset + 8 <= data.count else { return nil }
+        guard let offset = readInt32LE(data, offset: lumpOffset),
+              let length = readInt32LE(data, offset: lumpOffset + 4) else {
+            return nil
+        }
+        return (offset, length)
+    }
+
+    private static func image(from pixels: Data, width: Int, height: Int) -> NSImage? {
+        let palette = QuakePalette.bytes
+        guard palette.count >= 768 else { return nil }
+
+        let pixelCountResult = width.multipliedReportingOverflow(by: height)
+        guard !pixelCountResult.overflow else { return nil }
+        let pixelCount = pixelCountResult.partialValue
+        guard pixels.count >= pixelCount else { return nil }
+
+        let rgbaBytesResult = pixelCount.multipliedReportingOverflow(by: 4)
+        guard !rgbaBytesResult.overflow else { return nil }
+        var rgba = Data(count: rgbaBytesResult.partialValue)
+
+        var conversionSucceeded = true
+        rgba.withUnsafeMutableBytes { destBuffer in
+            guard let dest = destBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                conversionSucceeded = false
+                return
+            }
+
+            pixels.withUnsafeBytes { srcBuffer in
+                guard let src = srcBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                    conversionSucceeded = false
+                    return
+                }
+
+                for i in 0..<pixelCount {
+                    let paletteIndex = Int(src[i])
+                    if paletteIndex == 255 {
+                        let destIndex = i * 4
+                        dest[destIndex] = 0
+                        dest[destIndex + 1] = 0
+                        dest[destIndex + 2] = 0
+                        dest[destIndex + 3] = 0
+                        continue
+                    }
+
+                    let paletteOffset = paletteIndex * 3
+                    guard paletteOffset + 2 < palette.count else {
+                        conversionSucceeded = false
+                        return
+                    }
+                    let destIndex = i * 4
+                    dest[destIndex] = palette[paletteOffset]
+                    dest[destIndex + 1] = palette[paletteOffset + 1]
+                    dest[destIndex + 2] = palette[paletteOffset + 2]
+                    dest[destIndex + 3] = 255
+                }
+            }
+        }
+
+        guard conversionSucceeded else { return nil }
+
+        guard let provider = CGDataProvider(data: rgba as CFData) else { return nil }
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        guard let cgImage = CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: true,
+            intent: .defaultIntent
+        ) else {
+            return nil
+        }
+
+        return NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
+    }
+
+    @inline(__always)
+    static func readInt32LE(_ data: Data, offset: Int) -> Int? {
+        guard offset >= 0, offset + 4 <= data.count else { return nil }
+        return data.subdata(in: offset ..< offset + 4).withUnsafeBytes {
+            Int(Int32(littleEndian: $0.load(as: Int32.self)))
+        }
+    }
+}
+
+private enum WadPreviewRenderer {
+    private struct Entry {
+        let offset: Int
+        let dsize: Int
+        let size: Int
+        let type: UInt8
+        let name: String
+    }
+
+    static func renderImage(fileName: String, data: Data) -> NSImage? {
+        guard fileName.lowercased() == "gfx.wad" else { return nil }
+        guard data.count >= 12 else { return nil }
+
+        guard let dirEntries = BspPreviewRenderer.readInt32LE(data, offset: 4),
+              let dirOffset = BspPreviewRenderer.readInt32LE(data, offset: 8),
+              dirEntries > 0, dirOffset >= 0 else {
+            return nil
+        }
+
+        let entrySize = 32
+        let directoryEndResult = dirOffset.addingReportingOverflow(dirEntries * entrySize)
+        guard !directoryEndResult.overflow else { return nil }
+        let directoryEnd = directoryEndResult.partialValue
+        guard directoryEnd <= data.count else { return nil }
+
+        var entries: [Entry] = []
+        entries.reserveCapacity(dirEntries)
+
+        for i in 0..<dirEntries {
+            let base = dirOffset + i * entrySize
+            guard base + entrySize <= data.count else { continue }
+            guard let offset = BspPreviewRenderer.readInt32LE(data, offset: base),
+                  let dsize = BspPreviewRenderer.readInt32LE(data, offset: base + 4),
+                  let size = BspPreviewRenderer.readInt32LE(data, offset: base + 8) else {
+                continue
+            }
+            let type = data[base + 12]
+            // base+13 compression, base+14 padding(2 bytes)
+            let nameData = data.subdata(in: base + 16 ..< base + 32)
+            let name = asciiStringFromNullTerminated(nameData)
+
+            guard offset >= 0, size > 0, offset + size <= data.count else { continue }
+            entries.append(Entry(offset: offset, dsize: dsize, size: size, type: type, name: name))
+        }
+
+        let images = entries.compactMap { decodeImage(entry: $0, data: data) }
+        guard !images.isEmpty else { return nil }
+        return contactSheet(from: images)
+    }
+
+    private static func decodeImage(entry: Entry, data: Data) -> NSImage? {
+        // Palette entries are not images.
+        if entry.type == Character("@").asciiValue { return nil }
+
+        if entry.type == Character("D").asciiValue {
+            return decodeMiptex(entry: entry, data: data)
+        }
+
+        // Treat others as simple header (width, height, then palettized pixels).
+        guard entry.offset + 8 <= data.count else { return nil }
+        guard let width = BspPreviewRenderer.readInt32LE(data, offset: entry.offset),
+              let height = BspPreviewRenderer.readInt32LE(data, offset: entry.offset + 4),
+              width > 0, height > 0 else { return nil }
+
+        let pixelCountResult = width.multipliedReportingOverflow(by: height)
+        guard !pixelCountResult.overflow else { return nil }
+        let pixelCount = pixelCountResult.partialValue
+        guard pixelCount > 0 else { return nil }
+
+        let pixelStart = entry.offset + 8
+        guard pixelStart + pixelCount <= entry.offset + entry.size,
+              pixelStart + pixelCount <= data.count else { return nil }
+
+        let pixels = data.subdata(in: pixelStart ..< pixelStart + pixelCount)
+        return image(from: pixels, width: width, height: height)
+    }
+
+    private static func decodeMiptex(entry: Entry, data: Data) -> NSImage? {
+        let base = entry.offset
+        guard base + 40 <= data.count else { return nil }
+
+        guard let width = BspPreviewRenderer.readInt32LE(data, offset: base + 16),
+              let height = BspPreviewRenderer.readInt32LE(data, offset: base + 20),
+              let ofs1 = BspPreviewRenderer.readInt32LE(data, offset: base + 24),
+              width > 0, height > 0, ofs1 >= 0 else {
+            return nil
+        }
+
+        let pixelCountResult = width.multipliedReportingOverflow(by: height)
+        guard !pixelCountResult.overflow else { return nil }
+        let pixelCount = pixelCountResult.partialValue
+        guard pixelCount > 0 else { return nil }
+
+        let pixelStartResult = base.addingReportingOverflow(ofs1)
+        guard !pixelStartResult.overflow else { return nil }
+        let pixelStart = pixelStartResult.partialValue
+        guard pixelStart + pixelCount <= base + entry.size,
+              pixelStart + pixelCount <= data.count else { return nil }
+
+        let pixels = data.subdata(in: pixelStart ..< pixelStart + pixelCount)
+        return image(from: pixels, width: width, height: height)
+    }
+
+    private static func image(from pixels: Data, width: Int, height: Int) -> NSImage? {
+        let palette = QuakePalette.bytes
+        guard palette.count >= 768 else { return nil }
+
+        let pixelCountResult = width.multipliedReportingOverflow(by: height)
+        guard !pixelCountResult.overflow else { return nil }
+        let pixelCount = pixelCountResult.partialValue
+        guard pixels.count >= pixelCount else { return nil }
+
+        let rgbaBytesResult = pixelCount.multipliedReportingOverflow(by: 4)
+        guard !rgbaBytesResult.overflow else { return nil }
+        var rgba = Data(count: rgbaBytesResult.partialValue)
+
+        var conversionSucceeded = true
+        rgba.withUnsafeMutableBytes { destBuffer in
+            guard let dest = destBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                conversionSucceeded = false
+                return
+            }
+
+            pixels.withUnsafeBytes { srcBuffer in
+                guard let src = srcBuffer.bindMemory(to: UInt8.self).baseAddress else {
+                    conversionSucceeded = false
+                    return
+                }
+
+                for i in 0..<pixelCount {
+                    let paletteIndex = Int(src[i])
+                    if paletteIndex == 255 {
+                        let destIndex = i * 4
+                        dest[destIndex] = 0
+                        dest[destIndex + 1] = 0
+                        dest[destIndex + 2] = 0
+                        dest[destIndex + 3] = 0
+                        continue
+                    }
+                    let paletteOffset = paletteIndex * 3
+                    guard paletteOffset + 2 < palette.count else {
+                        conversionSucceeded = false
+                        return
+                    }
+                    let destIndex = i * 4
+                    dest[destIndex] = palette[paletteOffset]
+                    dest[destIndex + 1] = palette[paletteOffset + 1]
+                    dest[destIndex + 2] = palette[paletteOffset + 2]
+                    dest[destIndex + 3] = 255
+                }
+            }
+        }
+
+        guard conversionSucceeded else { return nil }
+
+        guard let provider = CGDataProvider(data: rgba as CFData) else { return nil }
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        guard let cgImage = CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo,
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: true,
+            intent: .defaultIntent
+        ) else {
+            return nil
+        }
+
+        return NSImage(cgImage: cgImage, size: NSSize(width: width, height: height))
+    }
+
+    private static func contactSheet(from images: [NSImage]) -> NSImage? {
+        let tileSize: CGFloat = 64
+        let columns = 4
+        let rows = Int(ceil(Double(images.count) / Double(columns)))
+        let sheetSize = NSSize(width: CGFloat(columns) * tileSize, height: CGFloat(rows) * tileSize)
+        guard sheetSize.width > 0, sheetSize.height > 0 else { return nil }
+
+        let sheet = NSImage(size: sheetSize)
+        sheet.lockFocus()
+        NSColor.clear.setFill()
+        NSRect(origin: .zero, size: sheetSize).fill()
+
+        for (index, image) in images.enumerated() {
+            let col = index % columns
+            let row = index / columns
+            let tileOrigin = NSPoint(x: CGFloat(col) * tileSize, y: sheetSize.height - CGFloat(row + 1) * tileSize)
+            let targetRect = NSRect(origin: tileOrigin, size: NSSize(width: tileSize, height: tileSize))
+
+            let rep = image.bestRepresentation(for: NSRect(origin: .zero, size: image.size), context: nil, hints: nil)
+            NSGraphicsContext.current?.imageInterpolation = .high
+            rep?.draw(in: targetRect)
+        }
+
+        sheet.unlockFocus()
+        return sheet
+    }
+
+    private static func asciiStringFromNullTerminated(_ data: Data) -> String {
+        let trimmed = data.prefix { $0 != 0 }
+        return String(bytes: trimmed, encoding: .ascii) ?? ""
     }
 }
 
