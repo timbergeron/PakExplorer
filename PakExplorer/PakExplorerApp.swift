@@ -176,29 +176,14 @@ struct PakNewCommands: Commands {
 }
 
 struct PakAboutCommands: Commands {
+    private let aboutPresenter = AboutWindowPresenter.shared
+
     var body: some Commands {
         CommandGroup(replacing: .appInfo) {
             Button("About PakExplorer") {
-                showAbout()
+                aboutPresenter.show()
             }
         }
-    }
-
-    private func showAbout() {
-        let alert = NSAlert()
-        alert.messageText = "PakExplorer"
-        alert.informativeText = "Simple Quake `.pak` & `.pk3` explorer inspired by PakScape and originally developed by Peter Engström."
-        alert.alertStyle = .informational
-        if let icon = NSApp.applicationIconImage {
-            alert.icon = icon
-        }
-
-        let urlString = "https://github.com/timbergeron/PakExplorer"
-        let displayString = "github.com/timbergeron/PakExplorer"
-        let linkButton = LinkButton(title: displayString, url: URL(string: urlString)!)
-        linkButton.sizeToFit()
-        alert.accessoryView = linkButton
-        alert.runModal()
     }
 }
 
@@ -220,6 +205,134 @@ struct PakViewCommands: Commands {
             .disabled(!(pakCommands?.canZoomOutIcons ?? false))
         }
     }
+}
+
+private final class AboutWindowPresenter {
+    static let shared = AboutWindowPresenter()
+    private var window: NSWindow?
+
+    func show() {
+        let parentWindow = NSApp.keyWindow ?? NSApp.mainWindow
+
+        if window == nil {
+            window = makeWindow()
+        }
+
+        guard let window else { return }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        DispatchQueue.main.async { [weak self, weak window, weak parentWindow] in
+            guard let self, let window else { return }
+            self.centerWindow(window, relativeTo: parentWindow)
+        }
+    }
+
+    private func makeWindow() -> NSWindow {
+        let hostingController = NSHostingController(rootView: AboutView())
+        let window = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 440, height: 360),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+
+        window.title = "About PakExplorer"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        window.standardWindowButton(.zoomButton)?.isHidden = true
+        window.isReleasedWhenClosed = false
+        window.contentViewController = hostingController
+
+        return window
+    }
+
+    private func centerWindow(_ window: NSWindow, relativeTo parent: NSWindow?) {
+        let frame = window.frame
+
+        if let parent {
+            let parentFrame = parent.frame
+            let origin = NSPoint(
+                x: parentFrame.midX - frame.size.width / 2,
+                y: parentFrame.midY - frame.size.height / 2
+            )
+            window.setFrame(NSRect(origin: origin, size: frame.size), display: true)
+            return
+        }
+
+        let targetScreen = window.screen ?? NSScreen.main
+
+        guard let screen = targetScreen else {
+            window.center()
+            return
+        }
+
+        let visibleFrame = screen.visibleFrame
+        let origin = NSPoint(
+            x: visibleFrame.midX - frame.size.width / 2,
+            y: visibleFrame.midY - frame.size.height / 2
+        )
+
+        window.setFrame(NSRect(origin: origin, size: frame.size), display: true)
+    }
+}
+
+private struct AboutView: View {
+    private let urlString = "https://github.com/timbergeron/PakExplorer"
+    private let displayString = "github.com/timbergeron/PakExplorer"
+    private var versionText: String? {
+        let bundle = Bundle.main
+        guard let version = bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String else {
+            return nil
+        }
+        return "Version \(version)"
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            if let icon = NSApp.applicationIconImage {
+                Image(nsImage: icon)
+                    .resizable()
+                    .frame(width: 120, height: 120)
+                    .cornerRadius(18)
+                    .shadow(radius: 2)
+            }
+
+            Text("PakExplorer")
+                .font(.title2.weight(.semibold))
+
+            Text("Simple Quake `.pak` & `.pk3` explorer inspired by PakScape and originally developed by Peter Engström.")
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .foregroundStyle(.secondary)
+                .font(.body)
+                .frame(maxWidth: 360)
+
+            if let versionText {
+                Text(versionText)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+
+            LinkButtonRepresentable(title: displayString, url: URL(string: urlString)!)
+                .fixedSize()
+        }
+        .padding(.vertical, 24)
+        .padding(.horizontal, 28)
+        .frame(minWidth: 380, idealWidth: 420)
+    }
+}
+
+private struct LinkButtonRepresentable: NSViewRepresentable {
+    let title: String
+    let url: URL
+
+    func makeNSView(context: Context) -> NSButton {
+        LinkButton(title: title, url: url)
+    }
+
+    func updateNSView(_ nsView: NSButton, context: Context) {}
 }
 
 private final class LinkButton: NSButton {
