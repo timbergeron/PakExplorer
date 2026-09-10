@@ -10,6 +10,7 @@ public enum MessageDialogButtons
     Ok,
     ConfirmCancel,
     SaveDiscardCancel,
+    ImportConflict,
 }
 
 public enum MessageDialogResult
@@ -20,6 +21,9 @@ public enum MessageDialogResult
     Save,
     Discard,
     Cancel,
+    KeepBoth,
+    Skip,
+    Replace,
 }
 
 public sealed class MessageDialogWindow : Window
@@ -58,6 +62,12 @@ public sealed class MessageDialogWindow : Window
                 buttonPanel.Children.Add(CreateButton("Cancel", MessageDialogResult.Cancel, isCancel: true));
                 buttonPanel.Children.Add(CreateButton("Discard", MessageDialogResult.Discard));
                 buttonPanel.Children.Add(CreateButton("Save", MessageDialogResult.Save, isDefault: true));
+                break;
+            case MessageDialogButtons.ImportConflict:
+                buttonPanel.Children.Add(CreateButton("Cancel", MessageDialogResult.Cancel, isCancel: true));
+                buttonPanel.Children.Add(CreateButton("Keep Both", MessageDialogResult.KeepBoth));
+                buttonPanel.Children.Add(CreateButton("Skip", MessageDialogResult.Skip, isDefault: true));
+                buttonPanel.Children.Add(CreateButton("Replace", MessageDialogResult.Replace));
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(buttons));

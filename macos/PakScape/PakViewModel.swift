@@ -1055,6 +1055,8 @@ final class PakViewModel: NSObject, ObservableObject {
     private func pasteFileURLs(_ urls: [URL], into folder: PakNode) -> [PakNode] {
         guard isEditable else { return [] }
         var inserted: [PakNode] = []
+        let originalPlacements = PakTreeMutation.placements(for: folder.children ?? [], in: folder)
+        var replaced: [PakNodePlacement] = []
         var failures: [String] = []
         var budget: PakImportBudget
         do {
@@ -1065,8 +1067,39 @@ final class PakViewModel: NSObject, ObservableObject {
         }
 
         for url in urls {
+            let existing = folder.children?.first {
+                $0.name.caseInsensitiveCompare(url.lastPathComponent) == .orderedSame
+            }
+            var replace = false
+            if let existing {
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = "An item named “\(existing.name)” already exists."
+                alert.informativeText = existing.isFolder
+                    ? "Do you want to replace the existing folder and all its contents, or keep both items? Stop ends this import; items already added are kept."
+                    : "Do you want to replace the existing item, or keep both items? Stop ends this import; items already added are kept."
+                alert.addButton(withTitle: "Keep Both")
+                alert.addButton(withTitle: "Stop").keyEquivalent = "\u{1b}"
+                alert.addButton(withTitle: "Replace")
+                let response = alert.runModal()
+                if response == .alertThirdButtonReturn {
+                    replace = true
+                } else if response != .alertFirstButtonReturn {
+                    break
+                }
+            }
             do {
-                let node = try createNodeFromFileURL(url, in: folder, budget: &budget)
+                var candidateBudget = budget
+                let node = try createNodeFromFileURL(url, in: folder, budget: &candidateBudget)
+                if replace, let existing {
+                    node.name = existing.name
+                    if let placement = originalPlacements.first(where: { $0.node.id == existing.id }) {
+                        replaced.append(placement)
+                    }
+                    folder.children?.removeAll { $0.id == existing.id }
+                    inserted.removeAll { $0.id == existing.id }
+                }
+                budget = candidateBudget
                 insert(node: node, into: folder)
                 inserted.append(node)
             } catch {
@@ -1079,7 +1112,7 @@ final class PakViewModel: NSObject, ObservableObject {
             let insertedPlacements = PakTreeMutation.placements(for: inserted, in: folder)
             registerTreeUndo(
                 removing: insertedPlacements,
-                inserting: [],
+                inserting: replaced,
                 actionName: "Import"
             )
             notifyDocumentChanged()

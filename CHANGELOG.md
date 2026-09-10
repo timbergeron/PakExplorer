@@ -1,5 +1,10 @@
 # Changelog
 
+- Added duplicate-item prompts when dragging, adding, or pasting files from disk:
+  Keep Both, Stop, or Replace on macOS; Keep Both, Skip, Cancel, or Replace
+  on Windows and Linux. Replacement preserves undo history and only removes
+  the original after the incoming item is read successfully.
+
 - Added Windows and Linux click-pause-click inline rename on an already-selected
   item's name, matching macOS and the system file managers.
 - Added Linux Undo/Redo parity with bounded history for archive additions, pastes,

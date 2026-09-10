@@ -32,6 +32,22 @@ public sealed class AvaloniaUserInteractionService(Func<Window?> ownerProvider)
         MimeTypes = ["application/x-quake-kpf"],
     };
 
+    public async Task<ImportConflictDecision> ResolveImportConflictAsync(string name, bool isFolder)
+    {
+        var message = $"An item named '{name}' already exists in this archive folder. " +
+            (isFolder ? "Replace removes the existing folder and all its contents. " : "Replace overwrites the existing item. ") +
+            "Keep Both adds a renamed copy. Skip leaves this item unchanged. Cancel stops the remaining import.";
+        var dialog = new MessageDialogWindow("File conflict", message, MessageDialogButtons.ImportConflict);
+        var result = await dialog.ShowDialog<MessageDialogResult>(Owner);
+        return result switch
+        {
+            MessageDialogResult.KeepBoth => ImportConflictDecision.KeepBoth,
+            MessageDialogResult.Skip => ImportConflictDecision.Skip,
+            MessageDialogResult.Replace => ImportConflictDecision.Replace,
+            _ => ImportConflictDecision.Cancel,
+        };
+    }
+
     public async Task<string?> PickArchiveToOpenAsync()
     {
         var files = await Owner.StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions

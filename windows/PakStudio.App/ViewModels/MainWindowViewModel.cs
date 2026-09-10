@@ -2415,6 +2415,20 @@ public sealed class MainWindowViewModel : ViewModelBase
             {
                 try
                 {
+                    var existing = destination.Children.FirstOrDefault(child =>
+                        string.Equals(child.Name, Path.GetFileName(Path.TrimEndingDirectorySeparator(path)),
+                            StringComparison.OrdinalIgnoreCase));
+                    var decision = existing is null
+                        ? ImportConflictDecision.KeepBoth
+                        : _messageBoxService.ResolveImportConflict(existing.Name, existing is ArchiveFolderNode);
+                    if (decision == ImportConflictDecision.Cancel)
+                    {
+                        break;
+                    }
+                    if (decision == ImportConflictDecision.Skip)
+                    {
+                        continue;
+                    }
                     var node = await Task.Run(() =>
                     {
                         var attributes = File.GetAttributes(path);
@@ -2422,6 +2436,13 @@ public sealed class MainWindowViewModel : ViewModelBase
                             ? (ArchiveNode)_fileTransferService.ImportDirectory(destination, path)
                             : _fileTransferService.ImportFile(destination, path);
                     }).ConfigureAwait(true);
+                    if (decision == ImportConflictDecision.Replace && existing is not null)
+                    {
+                        // Read and validate the incoming item before removing the original.
+                        ArchiveTreeEditor.Remove(existing);
+                        ArchiveTreeEditor.Rename(node, existing.Name);
+                        imported.Remove(existing);
+                    }
                     imported.Add(node);
                 }
                 catch (Exception exception)
@@ -2440,6 +2461,10 @@ public sealed class MainWindowViewModel : ViewModelBase
             RecordMutation(history);
             MarkDirty(imported.Count == 1 ? "Added 1 item." : $"Added {imported.Count} items.");
             RefreshAfterMutation(imported[0]);
+        }
+        if (imported.Count == 0)
+        {
+            StatusText = "No items were added.";
         }
         ReportTransferFailures("Some Items Were Not Added", failures);
     }

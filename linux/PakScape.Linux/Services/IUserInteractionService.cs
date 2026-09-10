@@ -24,6 +24,8 @@ public interface IUserInteractionService
 
     Task ShowErrorAsync(string title, string message);
 
+    Task<ImportConflictDecision> ResolveImportConflictAsync(string name, bool isFolder);
+
     Task<bool> ConfirmAsync(string title, string message, string confirmText = "Continue");
 
     Task<SaveChangesDecision> ConfirmSaveChangesAsync(string displayName);

@@ -10,6 +10,8 @@ public interface IMessageBoxService
 
     void ShowError(string title, string message);
 
+    ImportConflictDecision ResolveImportConflict(string name, bool isFolder);
+
     bool Confirm(string title, string message);
 
     SaveChangesDecision ConfirmSaveChanges(string displayName);

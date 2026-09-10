@@ -1724,6 +1724,20 @@ public partial class MainWindowViewModel : ObservableObject
             {
                 try
                 {
+                    var existing = destination.Children.FirstOrDefault(child =>
+                        string.Equals(child.Name, Path.GetFileName(Path.TrimEndingDirectorySeparator(path)),
+                            StringComparison.OrdinalIgnoreCase));
+                    var decision = existing is null
+                        ? ImportConflictDecision.KeepBoth
+                        : await _interactionService.ResolveImportConflictAsync(existing.Name, existing is ArchiveFolderNode);
+                    if (decision == ImportConflictDecision.Cancel)
+                    {
+                        break;
+                    }
+                    if (decision == ImportConflictDecision.Skip)
+                    {
+                        continue;
+                    }
                     var node = await Task.Run(() =>
                     {
                         var attributes = File.GetAttributes(path);
@@ -1731,6 +1745,13 @@ public partial class MainWindowViewModel : ObservableObject
                             ? (ArchiveNode)_fileTransferService.ImportDirectory(destination, path)
                             : _fileTransferService.ImportFile(destination, path);
                     });
+                    if (decision == ImportConflictDecision.Replace && existing is not null)
+                    {
+                        // Read and validate the incoming item before removing the original.
+                        ArchiveTreeEditor.Remove(existing);
+                        ArchiveTreeEditor.Rename(node, existing.Name);
+                        imported.Remove(existing);
+                    }
                     imported.Add(node);
                 }
                 catch (Exception exception)
@@ -1753,6 +1774,10 @@ public partial class MainWindowViewModel : ObservableObject
                 NavigateToFolder(destination);
             }
             RefreshAfterMutation(imported[0]);
+        }
+        if (imported.Count == 0)
+        {
+            StatusText = "No items were added.";
         }
         await ReportFailuresAsync("Some items were not added", failures);
     }

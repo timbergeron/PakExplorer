@@ -16,6 +16,21 @@ public sealed class MessageBoxService : IMessageBoxService
         dialog.ShowDialog();
     }
 
+    public ImportConflictDecision ResolveImportConflict(string name, bool isFolder)
+    {
+        var message = $"An item named '{name}' already exists in this archive folder. " +
+            (isFolder ? "Replace removes the existing folder and all its contents. " : "Replace overwrites the existing item. ") +
+            "Keep Both adds a renamed copy. Skip leaves this item unchanged. Cancel stops the remaining import.";
+        var result = ShowDialog("Replace or Skip Items", message, MessageDialogButtons.ImportConflict);
+        return result switch
+        {
+            MessageDialogResult.KeepBoth => ImportConflictDecision.KeepBoth,
+            MessageDialogResult.Skip => ImportConflictDecision.Skip,
+            MessageDialogResult.Replace => ImportConflictDecision.Replace,
+            _ => ImportConflictDecision.Cancel,
+        };
+    }
+
     public void ShowInfo(string title, string message)
     {
         _ = ShowDialog(title, message, MessageDialogButtons.Ok);
